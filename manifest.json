@@ -1,6 +1,6 @@
 {
-  "name": "My Teams",
-  "short_name": "My Teams",
+  "name": "Boxscore",
+  "short_name": "Boxscore",
   "description": "A personal dashboard tracking the teams and leagues I follow.",
   "start_url": "./index.html",
   "scope": "./",
