@@ -1,9 +1,13 @@
-/* Minimal service worker: precache the static shell so the app
-   opens instantly (and works offline for the shell) when launched
-   from a home-screen icon. Anything not on this origin — i.e. the
-   TheSportsDB API calls in js/app.js — is left alone and always
-   goes to the network; we never cache or intercept those. */
-const CACHE_NAME = 'my-teams-v1';
+/* Minimal service worker: keeps a copy of the static shell so the app
+   still opens (from cache) when launched offline. Anything not on this
+   origin — i.e. the TheSportsDB API calls in js/app.js — is left alone
+   and always goes straight to the network; we never cache or intercept
+   those. The shell itself is network-first: every load fetches the
+   latest deployed files and refreshes the cache, falling back to the
+   cache only when there's no connectivity — a cache-first strategy
+   here would keep serving whatever shipped the day this first
+   installed, forever, since nothing else invalidates it. */
+const CACHE_NAME = 'boxscore-v2';
 const SHELL_FILES = [
   './',
   './index.html',
@@ -37,13 +41,10 @@ self.addEventListener('fetch', (event) => {
   if(event.request.method !== 'GET' || url.origin !== self.location.origin) return;
 
   event.respondWith(
-    caches.match(event.request).then((cached) => {
-      if(cached) return cached;
-      return fetch(event.request).then((res) => {
-        const copy = res.clone();
-        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
-        return res;
-      });
-    }).catch(() => caches.match('./index.html'))
+    fetch(event.request).then((res) => {
+      const copy = res.clone();
+      caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+      return res;
+    }).catch(() => caches.match(event.request).then((cached) => cached || caches.match('./index.html')))
   );
 });
