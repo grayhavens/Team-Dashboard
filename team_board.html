@@ -1,0 +1,911 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>My Teams</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700;800&display=swap');
+
+  :root{
+    --paper: #EEEFEA;
+    --card: #FBFBF8;
+    --ink: #1B1D1F;
+    --sub: #6B6E70;
+    --rule: #1B1D1F;
+  }
+
+  *{ box-sizing: border-box; margin:0; padding:0; }
+
+  body{
+    background: var(--paper);
+    background-image:
+      radial-gradient(circle, rgba(27,29,31,0.07) 1px, transparent 1px);
+    background-size: 16px 16px;
+    color: var(--ink);
+    font-family: 'Inter', sans-serif;
+    padding: 40px;
+  }
+
+  .board{
+    max-width: 1400px;
+    margin: 0 auto;
+  }
+
+  .masthead{
+    display:flex;
+    align-items:flex-end;
+    justify-content: space-between;
+    padding-bottom: 20px;
+    margin-bottom: 32px;
+    border-bottom: 3px solid var(--ink);
+  }
+
+  .masthead h1{
+    font-family: 'Space Grotesk', sans-serif;
+    font-weight: 700;
+    font-size: 44px;
+    letter-spacing: -1px;
+    line-height: 1;
+  }
+
+  .masthead .tally{
+    text-align: right;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--sub);
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+  }
+
+  .masthead .tally b{
+    display:block;
+    font-family: 'Space Grotesk', sans-serif;
+    font-weight: 700;
+    font-size: 19px;
+    color: var(--ink);
+    letter-spacing: -0.3px;
+    text-transform: none;
+    margin-top: 2px;
+  }
+
+  .leagues{
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 24px;
+  }
+
+  .league{
+    background: var(--card);
+    border: 1.5px solid var(--ink);
+    box-shadow: 5px 5px 0 rgba(27,29,31,0.10);
+  }
+
+  .league-tab{
+    font-family: 'Space Grotesk', sans-serif;
+    font-weight: 700;
+    font-size: 17px;
+    letter-spacing: -0.2px;
+    padding: 16px 18px 14px;
+    border-bottom: 1.5px solid var(--ink);
+    display:flex;
+    align-items:center;
+    justify-content: space-between;
+  }
+
+  .league-tab-left{
+    display:flex;
+    align-items:center;
+    gap: 10px;
+  }
+
+  .league-tab .n{
+    font-family: 'Inter', sans-serif;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--sub);
+    letter-spacing: 0.2px;
+  }
+
+  .team{
+    display:flex;
+    align-items:center;
+    gap: 14px;
+    padding: 16px 18px;
+    position: relative;
+  }
+
+  .team + .team{
+    border-top: 1.5px dashed #C4C5BF;
+  }
+
+  .badge{
+    flex: 0 0 44px;
+    width: 44px;
+    height: 44px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    font-family: 'Space Grotesk', sans-serif;
+    font-weight: 700;
+    font-size: 15px;
+    letter-spacing: 0.2px;
+    border-radius: 3px;
+  }
+
+  .team-name{
+    font-weight: 700;
+    font-size: 16.5px;
+    line-height: 1.15;
+    letter-spacing: -0.1px;
+  }
+
+  .team-sub{
+    font-size: 11.5px;
+    color: var(--sub);
+    font-weight: 500;
+    letter-spacing: 0.1px;
+    margin-top: 1px;
+  }
+
+  .scoring-chip{
+    margin-left: auto;
+    flex: 0 0 auto;
+    font-family: 'Inter', sans-serif;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+    color: var(--sub);
+    background: #F1F1EC;
+    border: 1px solid #D6D7D0;
+    border-radius: 20px;
+    padding: 5px 11px;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  }
+
+  .scoring-chip:hover{
+    background: var(--ink);
+    color: #FFFFFF;
+    border-color: var(--ink);
+  }
+
+  @media (max-width: 1100px){
+    .leagues{ grid-template-columns: repeat(2, 1fr); }
+  }
+
+  /* ---- Interactive team rows ---- */
+  .team.clickable{
+    cursor: pointer;
+    transition: background 0.15s ease;
+  }
+
+  .team.clickable:hover{
+    background: #F3F3EF;
+  }
+
+  .team.clickable:active{
+    background: #ECECE6;
+  }
+
+  /* ---- Modal ---- */
+  .modal-overlay{
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(27,29,31,0.45);
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    z-index: 100;
+  }
+
+  .modal-overlay.open{
+    display: flex;
+  }
+
+  .modal{
+    background: var(--card);
+    border: 1.5px solid var(--ink);
+    box-shadow: 8px 8px 0 rgba(27,29,31,0.18);
+    max-width: 400px;
+    width: 100%;
+    max-height: 85vh;
+    overflow-y: auto;
+  }
+
+  .modal-accent{
+    height: 6px;
+    width: 100%;
+  }
+
+  .modal-head{
+    display: flex;
+    align-items: center;
+    gap: 13px;
+    padding: 18px 22px 16px;
+    position: relative;
+  }
+
+  .modal-head .badge{
+    flex: 0 0 40px;
+    width: 40px;
+    height: 40px;
+    font-size: 13px;
+  }
+
+  .modal-head h2{
+    font-family: 'Space Grotesk', sans-serif;
+    font-weight: 700;
+    font-size: 19px;
+    letter-spacing: -0.3px;
+  }
+
+  .modal-head .modal-sub{
+    font-size: 11px;
+    color: var(--sub);
+    font-weight: 500;
+    margin-top: 1px;
+  }
+
+  .modal-close{
+    position: absolute;
+    top: 12px;
+    right: 14px;
+    background: none;
+    border: none;
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 18px;
+    line-height: 1;
+    color: var(--sub);
+    cursor: pointer;
+    padding: 6px;
+  }
+
+  .modal-close:hover{ color: var(--ink); }
+
+  .stat-strip{
+    display: flex;
+    border-top: 1px solid #E2E3DD;
+    border-bottom: 1px solid #E2E3DD;
+  }
+
+  .stat-cell{
+    flex: 1;
+    text-align: center;
+    padding: 14px 6px;
+  }
+
+  .stat-cell + .stat-cell{
+    border-left: 1px solid #E2E3DD;
+  }
+
+  .stat-cell .num{
+    font-family: 'Space Grotesk', sans-serif;
+    font-weight: 700;
+    font-size: 19px;
+    letter-spacing: -0.3px;
+  }
+
+  .stat-cell .lbl{
+    font-size: 9.5px;
+    font-weight: 600;
+    color: var(--sub);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-top: 3px;
+  }
+
+  .modal-body{
+    padding: 18px 22px 22px;
+  }
+
+  .modal-section-title{
+    font-size: 10.5px;
+    font-weight: 700;
+    color: var(--sub);
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    margin-bottom: 8px;
+  }
+
+  .form-list{
+    margin-bottom: 20px;
+  }
+
+  .form-item{
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    padding: 8px 0;
+  }
+
+  .form-pill{
+    flex: 0 0 20px;
+    height: 20px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Space Grotesk', sans-serif;
+    font-weight: 700;
+    font-size: 10px;
+    color: #FFFFFF;
+  }
+
+  .form-pill.w{ background: #1B7A3D; }
+  .form-pill.d{ background: #9A8B2E; }
+  .form-pill.l{ background: #B0322C; }
+
+  .form-detail{
+    font-size: 13px;
+    font-weight: 600;
+    flex: 1;
+  }
+
+  .form-detail .opp{
+    display: block;
+  }
+
+  .form-detail .meta{
+    color: var(--sub);
+    font-weight: 500;
+    font-size: 11.5px;
+    margin-top: 1px;
+  }
+
+  .form-score{
+    font-family: 'Space Grotesk', sans-serif;
+    font-weight: 700;
+    font-size: 13px;
+  }
+
+  .next-match{
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+
+  .next-match .nm-teams{
+    font-weight: 700;
+    font-size: 14px;
+  }
+
+  .next-match .nm-when{
+    font-size: 11px;
+    color: var(--sub);
+    font-weight: 500;
+    margin-top: 2px;
+  }
+
+  .next-match .nm-prob{
+    text-align: right;
+    font-family: 'Space Grotesk', sans-serif;
+    font-weight: 700;
+    font-size: 16px;
+    white-space: nowrap;
+  }
+
+  .next-match .nm-prob .lbl{
+    font-family: 'Inter', sans-serif;
+    font-size: 9px;
+    font-weight: 600;
+    color: var(--sub);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+  }
+
+  .scoring-list{
+    display: flex;
+    flex-direction: column;
+  }
+
+  .scoring-item{
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 9px 0;
+  }
+
+  .scoring-item + .scoring-item{
+    border-top: 1px solid #ECECE7;
+  }
+
+  .scoring-label{
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .scoring-value{
+    flex: 0 0 auto;
+    font-family: 'Space Grotesk', sans-serif;
+    font-weight: 700;
+    font-size: 12.5px;
+    padding: 3px 9px;
+    border-radius: 20px;
+    white-space: nowrap;
+  }
+
+  .scoring-value.pos{
+    background: #E4F1E8;
+    color: #1B7A3D;
+  }
+
+  .scoring-value.neg{
+    background: #F7E7E5;
+    color: #B0322C;
+  }
+</style>
+</head>
+<body>
+<div class="board">
+
+  <div class="masthead">
+    <h1>My Teams</h1>
+    <div class="tally">Leagues Followed<b>8 Leagues · 21 Teams</b></div>
+  </div>
+
+  <div class="leagues">
+
+    <!-- EPL -->
+    <div class="league">
+      <div class="league-tab"><div class="league-tab-left">EPL <div class="scoring-chip" onclick="openLeagueModal('epl')">Scoring</div></div><span class="n">'26/'27 Season</span></div>
+      <div class="team clickable" onclick="openTeamModal('liverpool')">
+        <div class="badge" style="background:#C8102E; color:#F6EB61;">LFC</div>
+        <div><div class="team-name">Liverpool</div><div class="team-sub">Premier League</div></div>
+      </div>
+      <div class="team clickable" onclick="openTeamModal('newcastle')">
+        <div class="badge" style="background:#241F20; color:#FFFFFF;">NUFC</div>
+        <div><div class="team-name">Newcastle</div><div class="team-sub">Premier League</div></div>
+      </div>
+    </div>
+
+    <!-- NFL -->
+    <div class="league">
+      <div class="league-tab"><div class="league-tab-left">NFL <div class="scoring-chip" onclick="openLeagueModal('nfl')">Scoring</div></div><span class="n">'26 Season</span></div>
+      <div class="team">
+        <div class="badge" style="background:#0076B6; color:#B0B7BC;">DET</div>
+        <div><div class="team-name">Lions</div><div class="team-sub">Detroit</div></div>
+      </div>
+      <div class="team">
+        <div class="badge" style="background:#101820; color:#FFB612;">PIT</div>
+        <div><div class="team-name">Steelers</div><div class="team-sub">Pittsburgh</div></div>
+      </div>
+      <div class="team">
+        <div class="badge" style="background:#008E97; color:#F58220;">MIA</div>
+        <div><div class="team-name">Dolphins</div><div class="team-sub">Miami</div></div>
+      </div>
+    </div>
+
+    <!-- NBA -->
+    <div class="league">
+      <div class="league-tab"><div class="league-tab-left">NBA <div class="scoring-chip" onclick="openLeagueModal('nba')">Scoring</div></div><span class="n">'26/'27 Season</span></div>
+      <div class="team">
+        <div class="badge" style="background:#860038; color:#FDBB30;">CLE</div>
+        <div><div class="team-name">Cavaliers</div><div class="team-sub">Cleveland</div></div>
+      </div>
+      <div class="team">
+        <div class="badge" style="background:#0E2240; color:#FEC524;">DEN</div>
+        <div><div class="team-name">Nuggets</div><div class="team-sub">Denver</div></div>
+      </div>
+      <div class="team">
+        <div class="badge" style="background:#00538C; color:#B8C4CA;">DAL</div>
+        <div><div class="team-name">Mavs</div><div class="team-sub">Dallas</div></div>
+      </div>
+    </div>
+
+    <!-- NHL -->
+    <div class="league">
+      <div class="league-tab"><div class="league-tab-left">NHL <div class="scoring-chip" onclick="openLeagueModal('nhl')">Scoring</div></div><span class="n">'26/'27 Season</span></div>
+      <div class="team">
+        <div class="badge" style="background:#002868; color:#FFFFFF;">TBL</div>
+        <div><div class="team-name">Lightning</div><div class="team-sub">Tampa Bay</div></div>
+      </div>
+      <div class="team">
+        <div class="badge" style="background:#F74902; color:#000000;">PHI</div>
+        <div><div class="team-name">Flyers</div><div class="team-sub">Philadelphia</div></div>
+      </div>
+      <div class="team">
+        <div class="badge" style="background:#CE1126; color:#FFFFFF;">DET</div>
+        <div><div class="team-name">Red Wings</div><div class="team-sub">Detroit</div></div>
+      </div>
+    </div>
+
+    <!-- MLB -->
+    <div class="league">
+      <div class="league-tab"><div class="league-tab-left">MLB <div class="scoring-chip" onclick="openLeagueModal('mlb')">Scoring</div></div><span class="n">'27 Season</span></div>
+      <div class="team">
+        <div class="badge" style="background:#0E3386; color:#CC3433;">CHC</div>
+        <div><div class="team-name">Cubs</div><div class="team-sub">Chicago</div></div>
+      </div>
+      <div class="team">
+        <div class="badge" style="background:#2F241D; color:#FFC425;">SD</div>
+        <div><div class="team-name">Padres</div><div class="team-sub">San Diego</div></div>
+      </div>
+      <div class="team">
+        <div class="badge" style="background:#AB0003; color:#FFFFFF;">WSH</div>
+        <div><div class="team-name">Nationals</div><div class="team-sub">Washington</div></div>
+      </div>
+    </div>
+
+    <!-- WNBA -->
+    <div class="league">
+      <div class="league-tab"><div class="league-tab-left">WNBA <div class="scoring-chip" onclick="openLeagueModal('wnba')">Scoring</div></div><span class="n">'27 Season</span></div>
+      <div class="team">
+        <div class="badge" style="background:#000000; color:#8A6BAF;">GSV</div>
+        <div><div class="team-name">Valkyries</div><div class="team-sub">Golden State</div></div>
+      </div>
+    </div>
+
+    <!-- College Football -->
+    <div class="league">
+      <div class="league-tab"><div class="league-tab-left">College FB <div class="scoring-chip" onclick="openLeagueModal('cfb')">Scoring</div></div><span class="n">'26 Season</span></div>
+      <div class="team clickable" onclick="openTeamModal('oregon')">
+        <div class="badge" style="background:#154733; color:#FEE123;">ORE</div>
+        <div><div class="team-name">Oregon</div><div class="team-sub">Ducks</div></div>
+      </div>
+      <div class="team clickable" onclick="openTeamModal('texasam')">
+        <div class="badge" style="background:#500000; color:#FFFFFF;">A&amp;M</div>
+        <div><div class="team-name">Texas A&amp;M</div><div class="team-sub">Aggies</div></div>
+      </div>
+      <div class="team clickable" onclick="openTeamModal('arizona')">
+        <div class="badge" style="background:#AB0520; color:#0C234B;">ARIZ</div>
+        <div><div class="team-name">Arizona</div><div class="team-sub">Wildcats</div></div>
+      </div>
+    </div>
+
+    <!-- College Basketball -->
+    <div class="league">
+      <div class="league-tab"><div class="league-tab-left">College BB <div class="scoring-chip" onclick="openLeagueModal('mcbb')">Scoring</div></div><span class="n">'26/'27 Season</span></div>
+      <div class="team">
+        <div class="badge" style="background:#C8102E; color:#FFFFFF;">HOU</div>
+        <div><div class="team-name">Houston</div><div class="team-sub">Cougars</div></div>
+      </div>
+      <div class="team">
+        <div class="badge" style="background:#000000; color:#CEB888;">PUR</div>
+        <div><div class="team-name">Purdue</div><div class="team-sub">Boilermakers</div></div>
+      </div>
+      <div class="team">
+        <div class="badge" style="background:#0F2439; color:#FFFFFF;">USU</div>
+        <div><div class="team-name">Utah State</div><div class="team-sub">Aggies</div></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- Team detail modal -->
+<div class="modal-overlay" id="modal-overlay" onclick="if(event.target===this) closeTeamModal()">
+  <div class="modal" id="modal-content">
+    <!-- content injected by JS -->
+  </div>
+</div>
+
+<script>
+  const TEAM_DATA = {
+    liverpool: {
+      name: 'Liverpool',
+      sub: 'Premier League · \'26/\'27 Season',
+      accent: '#C8102E',
+      badgeStyle: 'background:#C8102E; color:#F6EB61;',
+      badgeText: 'LFC',
+      stats: [
+        { num: '6th', lbl: 'Position' },
+        { num: '5', lbl: 'Points' },
+        { num: '1-2-0', lbl: 'W-D-L' }
+      ],
+      form: [
+        { result: 'w', label: 'W', opponent: 'Ipswich Town', score: '2–0', where: 'Away' },
+        { result: 'd', label: 'D', opponent: 'Nottingham Forest', score: '2–2', where: 'Home' },
+        { result: 'd', label: 'D', opponent: 'Newcastle United', score: '2–2', where: 'Away' }
+      ],
+      next: {
+        matchup: 'vs Fulham',
+        when: 'Sat, Sep 12 · 9:00 AM CDT · Home',
+        prob: '68%'
+      }
+    },
+    newcastle: {
+      name: 'Newcastle',
+      sub: 'Premier League · \'26/\'27 Season',
+      accent: '#241F20',
+      badgeStyle: 'background:#241F20; color:#FFFFFF;',
+      badgeText: 'NUFC',
+      stats: [
+        { num: '6th', lbl: 'Position' },
+        { num: '5', lbl: 'Points' },
+        { num: '1-2-0', lbl: 'W-D-L' }
+      ],
+      form: [
+        { result: 'd', label: 'D', opponent: 'Bournemouth', score: '2–2', where: 'Home' },
+        { result: 'w', label: 'W', opponent: 'Tottenham Hotspur', score: '2–0', where: 'Away' },
+        { result: 'd', label: 'D', opponent: 'Liverpool FC', score: '2–2', where: 'Home' }
+      ],
+      next: {
+        matchup: 'vs Leeds United',
+        when: 'Mon, Sep 14 · 2:00 PM CDT · Away',
+        prob: '33%'
+      }
+    },
+    oregon: {
+      name: 'Oregon',
+      sub: 'College Football · \'26 Season',
+      accent: '#154733',
+      badgeStyle: 'background:#154733; color:#FEE123;',
+      badgeText: 'ORE',
+      stats: [
+        { num: '#2', lbl: 'AP Rank' },
+        { num: '1-0', lbl: 'Record' },
+        { num: 'Big Ten', lbl: 'Conference' }
+      ],
+      recentLabel: 'Results So Far',
+      form: [
+        { result: 'w', label: 'W', opponent: 'Boise State', score: '34–27', where: 'Home' }
+      ],
+      next: {
+        matchup: 'at Oklahoma State',
+        when: 'Sat, Sep 12 · 11:00 AM CDT · Away'
+      }
+    },
+    texasam: {
+      name: 'Texas A&M',
+      sub: 'College Football · \'26 Season',
+      accent: '#500000',
+      badgeStyle: 'background:#500000; color:#FFFFFF;',
+      badgeText: 'A&M',
+      stats: [
+        { num: '#8', lbl: 'AP Rank' },
+        { num: '1-0', lbl: 'Record' },
+        { num: 'SEC', lbl: 'Conference' }
+      ],
+      recentLabel: 'Results So Far',
+      form: [
+        { result: 'w', label: 'W', opponent: 'Missouri State', score: '50–0', where: 'Home' }
+      ],
+      next: {
+        matchup: 'vs Arizona State',
+        when: 'Sat, Sep 12 · 11:00 AM CDT · Home'
+      }
+    },
+    arizona: {
+      name: 'Arizona',
+      sub: 'College Football · \'26 Season',
+      accent: '#AB0520',
+      badgeStyle: 'background:#AB0520; color:#0C234B;',
+      badgeText: 'ARIZ',
+      stats: [
+        { num: 'Unranked', lbl: 'AP Rank' },
+        { num: '1-0', lbl: 'Record' },
+        { num: 'Big 12', lbl: 'Conference' }
+      ],
+      recentLabel: 'Results So Far',
+      form: [
+        { result: 'w', label: 'W', opponent: 'Northern Arizona', score: '35–7', where: 'Home' }
+      ],
+      next: {
+        matchup: 'at BYU',
+        when: 'Sat, Sep 12 · 2:30 PM CDT · Away'
+      }
+    }
+  };
+
+  const LEAGUE_SCORING = {
+    epl: {
+      name: 'EPL',
+      full: 'Premier League Scoring',
+      accent: '#3D195B',
+      rules: [
+        { label: 'Win League Cup', pts: 1 },
+        { label: 'Win FA Cup', pts: 2 },
+        { label: 'Make Europa League', pts: 3 },
+        { label: 'Make Champions League (any stage)', pts: 4 },
+        { label: '3rd in EPL', pts: 3 },
+        { label: '2nd in EPL', pts: 6 },
+        { label: 'Win EPL', pts: 9 },
+        { label: 'Relegation', pts: -5 }
+      ]
+    },
+    nfl: {
+      name: 'NFL',
+      full: 'NFL Scoring',
+      accent: '#013369',
+      rules: [
+        { label: 'Make the playoffs', pts: 1 },
+        { label: 'Division title', pts: 2 },
+        { label: 'Best record in conference', pts: 3 },
+        { label: 'Make conference finals', pts: 2 },
+        { label: 'Make Super Bowl', pts: 3 },
+        { label: 'Win Super Bowl', pts: 5 },
+        { label: 'Last place in division', pts: -2 },
+        { label: 'Worst record in conference', pts: -3 }
+      ]
+    },
+    nba: {
+      name: 'NBA',
+      full: 'NBA Scoring',
+      accent: '#C9082A',
+      rules: [
+        { label: 'Make the playoffs', pts: 1 },
+        { label: 'Division title', pts: 2 },
+        { label: 'Best record in conference', pts: 3 },
+        { label: 'Make conference finals', pts: 2 },
+        { label: 'Make Finals', pts: 3 },
+        { label: 'Win Finals', pts: 5 },
+        { label: 'Last place in division', pts: -2 },
+        { label: 'Worst record in conference', pts: -3 }
+      ]
+    },
+    nhl: {
+      name: 'NHL',
+      full: 'NHL Scoring',
+      accent: '#111111',
+      rules: [
+        { label: 'Make the playoffs', pts: 1 },
+        { label: 'Division title', pts: 2 },
+        { label: 'Best record in conference', pts: 3 },
+        { label: 'Make conference finals', pts: 2 },
+        { label: 'Make Stanley Cup Finals', pts: 3 },
+        { label: 'Win Stanley Cup Finals', pts: 5 },
+        { label: 'Last place in division', pts: -2 },
+        { label: 'Worst record in conference', pts: -3 }
+      ]
+    },
+    mlb: {
+      name: 'MLB',
+      full: 'MLB Scoring',
+      accent: '#041E42',
+      rules: [
+        { label: 'Make the playoffs', pts: 1 },
+        { label: 'Division title', pts: 2 },
+        { label: 'Best record in league', pts: 3 },
+        { label: 'Make LCS', pts: 2 },
+        { label: 'Make World Series', pts: 3 },
+        { label: 'Win World Series', pts: 5 },
+        { label: 'Last place in division', pts: -2 },
+        { label: 'Worst record in league', pts: -3 }
+      ]
+    },
+    wnba: {
+      name: 'WNBA',
+      full: 'WNBA Scoring',
+      accent: '#FF6900',
+      rules: [
+        { label: 'Make the playoffs', pts: 1 },
+        { label: 'Top-two regular-season record', pts: 2 },
+        { label: 'Reach Commissioner\u2019s Cup Final', pts: 1 },
+        { label: 'Win Commissioner\u2019s Cup', pts: 2 },
+        { label: 'Reach the semifinals', pts: 2 },
+        { label: 'Reach the Finals', pts: 3 },
+        { label: 'Win the Finals', pts: 5 },
+        { label: 'Missing the playoffs', pts: -3 },
+        { label: 'Bottom-three record', pts: -2 }
+      ]
+    },
+    cfb: {
+      name: 'College FB',
+      full: 'College Football Scoring',
+      accent: '#013220',
+      rules: [
+        { label: 'Make a bowl game', pts: 1 },
+        { label: 'Win a bowl game', pts: 1 },
+        { label: 'Win conference', pts: 2 },
+        { label: 'Make the CFP', pts: 2 },
+        { label: 'Make the CFP semifinal', pts: 2 },
+        { label: 'Make National Championship', pts: 3 },
+        { label: 'Win National Championship', pts: 5 },
+        { label: 'Don\u2019t make a bowl', pts: -2 },
+        { label: 'Finish last in conference', pts: -3 }
+      ]
+    },
+    mcbb: {
+      name: 'College BB',
+      full: 'College Basketball Scoring',
+      accent: '#CC5500',
+      rules: [
+        { label: 'Make NCAA Tournament', pts: 1 },
+        { label: 'Win conference tournament', pts: 2 },
+        { label: 'Win conference regular season', pts: 3 },
+        { label: 'Make Elite Eight', pts: 2 },
+        { label: 'Make National Championship game', pts: 3 },
+        { label: 'Win National Championship', pts: 5 },
+        { label: 'Don\u2019t make NCAA tournament', pts: -2 },
+        { label: 'Finish last in conference', pts: -3 }
+      ]
+    }
+  };
+
+  function openLeagueModal(leagueKey){
+    const data = LEAGUE_SCORING[leagueKey];
+    if(!data) return;
+
+    const rulesHtml = data.rules.map(r => `
+      <div class="scoring-item">
+        <div class="scoring-label">${r.label}</div>
+        <div class="scoring-value ${r.pts >= 0 ? 'pos' : 'neg'}">${r.pts >= 0 ? '+' : ''}${r.pts} pt${Math.abs(r.pts) === 1 ? '' : 's'}</div>
+      </div>
+    `).join('');
+
+    document.getElementById('modal-content').innerHTML = `
+      <div class="modal-accent" style="background:${data.accent};"></div>
+      <div class="modal-head">
+        <div>
+          <h2>${data.name}</h2>
+          <div class="modal-sub">${data.full}</div>
+        </div>
+        <button class="modal-close" onclick="closeTeamModal()">&times;</button>
+      </div>
+      <div class="modal-body" style="padding-top: 18px;">
+        <div class="scoring-list">${rulesHtml}</div>
+      </div>
+    `;
+
+    document.getElementById('modal-overlay').classList.add('open');
+  }
+
+  function openTeamModal(teamKey){
+    const data = TEAM_DATA[teamKey];
+    if(!data) return;
+
+    const formHtml = data.form.map(f => `
+      <div class="form-item">
+        <div class="form-pill ${f.result}">${f.label}</div>
+        <div class="form-detail">
+          <span class="opp">${f.opponent}</span>
+          <span class="meta">${f.where}</span>
+        </div>
+        <div class="form-score">${f.score}</div>
+      </div>
+    `).join('');
+
+    const statsHtml = data.stats.map(s => `
+      <div class="stat-cell">
+        <div class="num">${s.num}</div>
+        <div class="lbl">${s.lbl}</div>
+      </div>
+    `).join('');
+
+    const probHtml = data.next.prob ? `
+          <div class="nm-prob">
+            ${data.next.prob}
+            <div class="lbl">Win Prob.</div>
+          </div>` : '';
+
+    document.getElementById('modal-content').innerHTML = `
+      <div class="modal-accent" style="background:${data.accent};"></div>
+      <div class="modal-head">
+        <div class="badge" style="${data.badgeStyle}">${data.badgeText}</div>
+        <div>
+          <h2>${data.name}</h2>
+          <div class="modal-sub">${data.sub}</div>
+        </div>
+        <button class="modal-close" onclick="closeTeamModal()">&times;</button>
+      </div>
+      <div class="stat-strip">${statsHtml}</div>
+      <div class="modal-body">
+        <div class="modal-section-title">${data.recentLabel || 'Last 3 Matches'}</div>
+        <div class="form-list">${formHtml}</div>
+        <div class="modal-section-title">Next Match</div>
+        <div class="next-match">
+          <div class="nm-left">
+            <div class="nm-teams">${data.next.matchup}</div>
+            <div class="nm-when">${data.next.when}</div>
+          </div>${probHtml}
+        </div>
+      </div>
+    `;
+
+    document.getElementById('modal-overlay').classList.add('open');
+  }
+
+  function closeTeamModal(){
+    document.getElementById('modal-overlay').classList.remove('open');
+  }
+
+  document.addEventListener('keydown', (e) => {
+    if(e.key === 'Escape') closeTeamModal();
+  });
+</script>
+</body>
+</html>
