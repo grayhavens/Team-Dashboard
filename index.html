@@ -437,6 +437,40 @@
     background: #F7E7E5;
     color: #B0322C;
   }
+
+  /* ---- Live data additions ---- */
+  .live-badge{
+    display:inline-block;
+    margin-left: 6px;
+    font-family: 'Inter', sans-serif;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+    color: #1B7A3D;
+    background: #E4F1E8;
+    border-radius: 20px;
+    padding: 2px 7px;
+    vertical-align: middle;
+  }
+
+  .live-badge.err{
+    color: #B0322C;
+    background: #F7E7E5;
+  }
+
+  .no-live-note{
+    font-size: 13px;
+    color: var(--sub);
+    font-style: italic;
+    line-height: 1.5;
+    padding: 6px 0 10px;
+  }
+
+  .loading-note{
+    font-size: 13px;
+    color: var(--sub);
+    padding: 4px 0;
+  }
 </style>
 </head>
 <body>
@@ -465,15 +499,15 @@
     <!-- NFL -->
     <div class="league">
       <div class="league-tab"><div class="league-tab-left">NFL <div class="scoring-chip" onclick="openLeagueModal('nfl')">Scoring</div></div><span class="n">'26 Season</span></div>
-      <div class="team">
+      <div class="team clickable" onclick="openTeamModal('lions')">
         <div class="badge" style="background:#0076B6; color:#B0B7BC;">DET</div>
         <div><div class="team-name">Lions</div><div class="team-sub">Detroit</div></div>
       </div>
-      <div class="team">
+      <div class="team clickable" onclick="openTeamModal('steelers')">
         <div class="badge" style="background:#101820; color:#FFB612;">PIT</div>
         <div><div class="team-name">Steelers</div><div class="team-sub">Pittsburgh</div></div>
       </div>
-      <div class="team">
+      <div class="team clickable" onclick="openTeamModal('dolphins')">
         <div class="badge" style="background:#008E97; color:#F58220;">MIA</div>
         <div><div class="team-name">Dolphins</div><div class="team-sub">Miami</div></div>
       </div>
@@ -482,15 +516,15 @@
     <!-- NBA -->
     <div class="league">
       <div class="league-tab"><div class="league-tab-left">NBA <div class="scoring-chip" onclick="openLeagueModal('nba')">Scoring</div></div><span class="n">'26/'27 Season</span></div>
-      <div class="team">
+      <div class="team clickable" onclick="openTeamModal('cavaliers')">
         <div class="badge" style="background:#860038; color:#FDBB30;">CLE</div>
         <div><div class="team-name">Cavaliers</div><div class="team-sub">Cleveland</div></div>
       </div>
-      <div class="team">
+      <div class="team clickable" onclick="openTeamModal('nuggets')">
         <div class="badge" style="background:#0E2240; color:#FEC524;">DEN</div>
         <div><div class="team-name">Nuggets</div><div class="team-sub">Denver</div></div>
       </div>
-      <div class="team">
+      <div class="team clickable" onclick="openTeamModal('mavericks')">
         <div class="badge" style="background:#00538C; color:#B8C4CA;">DAL</div>
         <div><div class="team-name">Mavs</div><div class="team-sub">Dallas</div></div>
       </div>
@@ -499,15 +533,15 @@
     <!-- NHL -->
     <div class="league">
       <div class="league-tab"><div class="league-tab-left">NHL <div class="scoring-chip" onclick="openLeagueModal('nhl')">Scoring</div></div><span class="n">'26/'27 Season</span></div>
-      <div class="team">
+      <div class="team clickable" onclick="openTeamModal('lightning')">
         <div class="badge" style="background:#002868; color:#FFFFFF;">TBL</div>
         <div><div class="team-name">Lightning</div><div class="team-sub">Tampa Bay</div></div>
       </div>
-      <div class="team">
+      <div class="team clickable" onclick="openTeamModal('flyers')">
         <div class="badge" style="background:#F74902; color:#000000;">PHI</div>
         <div><div class="team-name">Flyers</div><div class="team-sub">Philadelphia</div></div>
       </div>
-      <div class="team">
+      <div class="team clickable" onclick="openTeamModal('redwings')">
         <div class="badge" style="background:#CE1126; color:#FFFFFF;">DET</div>
         <div><div class="team-name">Red Wings</div><div class="team-sub">Detroit</div></div>
       </div>
@@ -516,15 +550,15 @@
     <!-- MLB -->
     <div class="league">
       <div class="league-tab"><div class="league-tab-left">MLB <div class="scoring-chip" onclick="openLeagueModal('mlb')">Scoring</div></div><span class="n">'27 Season</span></div>
-      <div class="team">
+      <div class="team clickable" onclick="openTeamModal('cubs')">
         <div class="badge" style="background:#0E3386; color:#CC3433;">CHC</div>
         <div><div class="team-name">Cubs</div><div class="team-sub">Chicago</div></div>
       </div>
-      <div class="team">
+      <div class="team clickable" onclick="openTeamModal('padres')">
         <div class="badge" style="background:#2F241D; color:#FFC425;">SD</div>
         <div><div class="team-name">Padres</div><div class="team-sub">San Diego</div></div>
       </div>
-      <div class="team">
+      <div class="team clickable" onclick="openTeamModal('nationals')">
         <div class="badge" style="background:#AB0003; color:#FFFFFF;">WSH</div>
         <div><div class="team-name">Nationals</div><div class="team-sub">Washington</div></div>
       </div>
@@ -533,7 +567,7 @@
     <!-- WNBA -->
     <div class="league">
       <div class="league-tab"><div class="league-tab-left">WNBA <div class="scoring-chip" onclick="openLeagueModal('wnba')">Scoring</div></div><span class="n">'27 Season</span></div>
-      <div class="team">
+      <div class="team clickable" onclick="openTeamModal('valkyries')">
         <div class="badge" style="background:#000000; color:#8A6BAF;">GSV</div>
         <div><div class="team-name">Valkyries</div><div class="team-sub">Golden State</div></div>
       </div>
@@ -559,15 +593,15 @@
     <!-- College Basketball -->
     <div class="league">
       <div class="league-tab"><div class="league-tab-left">College BB <div class="scoring-chip" onclick="openLeagueModal('mcbb')">Scoring</div></div><span class="n">'26/'27 Season</span></div>
-      <div class="team">
+      <div class="team clickable" onclick="openTeamModal('houston')">
         <div class="badge" style="background:#C8102E; color:#FFFFFF;">HOU</div>
         <div><div class="team-name">Houston</div><div class="team-sub">Cougars</div></div>
       </div>
-      <div class="team">
+      <div class="team clickable" onclick="openTeamModal('purdue')">
         <div class="badge" style="background:#000000; color:#CEB888;">PUR</div>
         <div><div class="team-name">Purdue</div><div class="team-sub">Boilermakers</div></div>
       </div>
-      <div class="team">
+      <div class="team clickable" onclick="openTeamModal('utahstate')">
         <div class="badge" style="background:#0F2439; color:#FFFFFF;">USU</div>
         <div><div class="team-name">Utah State</div><div class="team-sub">Aggies</div></div>
       </div>
@@ -584,111 +618,52 @@
 </div>
 
 <script>
-  const TEAM_DATA = {
-    liverpool: {
-      name: 'Liverpool',
-      sub: 'Premier League · \'26/\'27 Season',
-      accent: '#C8102E',
-      badgeStyle: 'background:#C8102E; color:#F6EB61;',
-      badgeText: 'LFC',
-      stats: [
-        { num: '6th', lbl: 'Position' },
-        { num: '5', lbl: 'Points' },
-        { num: '1-2-0', lbl: 'W-D-L' }
-      ],
-      form: [
-        { result: 'w', label: 'W', opponent: 'Ipswich Town', score: '2–0', where: 'Away' },
-        { result: 'd', label: 'D', opponent: 'Nottingham Forest', score: '2–2', where: 'Home' },
-        { result: 'd', label: 'D', opponent: 'Newcastle United', score: '2–2', where: 'Away' }
-      ],
-      next: {
-        matchup: 'vs Fulham',
-        when: 'Sat, Sep 12 · 9:00 AM CDT · Home',
-        prob: '68%'
-      }
-    },
-    newcastle: {
-      name: 'Newcastle',
-      sub: 'Premier League · \'26/\'27 Season',
-      accent: '#241F20',
-      badgeStyle: 'background:#241F20; color:#FFFFFF;',
-      badgeText: 'NUFC',
-      stats: [
-        { num: '6th', lbl: 'Position' },
-        { num: '5', lbl: 'Points' },
-        { num: '1-2-0', lbl: 'W-D-L' }
-      ],
-      form: [
-        { result: 'd', label: 'D', opponent: 'Bournemouth', score: '2–2', where: 'Home' },
-        { result: 'w', label: 'W', opponent: 'Tottenham Hotspur', score: '2–0', where: 'Away' },
-        { result: 'd', label: 'D', opponent: 'Liverpool FC', score: '2–2', where: 'Home' }
-      ],
-      next: {
-        matchup: 'vs Leeds United',
-        when: 'Mon, Sep 14 · 2:00 PM CDT · Away',
-        prob: '33%'
-      }
-    },
-    oregon: {
-      name: 'Oregon',
-      sub: 'College Football · \'26 Season',
-      accent: '#154733',
-      badgeStyle: 'background:#154733; color:#FEE123;',
-      badgeText: 'ORE',
-      stats: [
-        { num: '#2', lbl: 'AP Rank' },
-        { num: '1-0', lbl: 'Record' },
-        { num: 'Big Ten', lbl: 'Conference' }
-      ],
-      recentLabel: 'Results So Far',
-      form: [
-        { result: 'w', label: 'W', opponent: 'Boise State', score: '34–27', where: 'Home' }
-      ],
-      next: {
-        matchup: 'at Oklahoma State',
-        when: 'Sat, Sep 12 · 11:00 AM CDT · Away'
-      }
-    },
-    texasam: {
-      name: 'Texas A&M',
-      sub: 'College Football · \'26 Season',
-      accent: '#500000',
-      badgeStyle: 'background:#500000; color:#FFFFFF;',
-      badgeText: 'A&M',
-      stats: [
-        { num: '#8', lbl: 'AP Rank' },
-        { num: '1-0', lbl: 'Record' },
-        { num: 'SEC', lbl: 'Conference' }
-      ],
-      recentLabel: 'Results So Far',
-      form: [
-        { result: 'w', label: 'W', opponent: 'Missouri State', score: '50–0', where: 'Home' }
-      ],
-      next: {
-        matchup: 'vs Arizona State',
-        when: 'Sat, Sep 12 · 11:00 AM CDT · Home'
-      }
-    },
-    arizona: {
-      name: 'Arizona',
-      sub: 'College Football · \'26 Season',
-      accent: '#AB0520',
-      badgeStyle: 'background:#AB0520; color:#0C234B;',
-      badgeText: 'ARIZ',
-      stats: [
-        { num: 'Unranked', lbl: 'AP Rank' },
-        { num: '1-0', lbl: 'Record' },
-        { num: 'Big 12', lbl: 'Conference' }
-      ],
-      recentLabel: 'Results So Far',
-      form: [
-        { result: 'w', label: 'W', opponent: 'Northern Arizona', score: '35–7', where: 'Home' }
-      ],
-      next: {
-        matchup: 'at BYU',
-        when: 'Sat, Sep 12 · 2:30 PM CDT · Away'
-      }
-    }
+  /* ============================================================
+     LIVE DATA: TheSportsDB v1 API
+     Using the public free test key "123" — rate-limited to 30
+     requests/min, which is plenty for a personal dashboard where
+     data only loads when you click a team (not all 21 at once).
+     If you upgrade to a premium key later (thesportsdb.com,
+     ~$9/mo), just swap the "123" below for your own key.
+     ============================================================ */
+  const API_BASE = 'https://www.thesportsdb.com/api/v1/json/123/';
+
+  // Static look/labels for every team, plus (where available) its
+  // TheSportsDB team ID so we can pull live results. Teams with
+  // sportsdbId: null don't have reliable live coverage yet (see
+  // College Basketball below) and fall back to a plain notice.
+  const TEAM_META = {
+    liverpool:  { name:'Liverpool',   sub:"Premier League · '26/'27 Season", accent:'#C8102E', badgeStyle:'background:#C8102E; color:#F6EB61;', badgeText:'LFC',  sportsdbId:'133602', leagueId:'4328', season:'2026-2027' },
+    newcastle:  { name:'Newcastle',   sub:"Premier League · '26/'27 Season", accent:'#241F20', badgeStyle:'background:#241F20; color:#FFFFFF;', badgeText:'NUFC', sportsdbId:'134777', leagueId:'4328', season:'2026-2027' },
+
+    lions:      { name:'Lions',       sub:"NFL · Detroit · '26 Season",     accent:'#0076B6', badgeStyle:'background:#0076B6; color:#B0B7BC;', badgeText:'DET',  sportsdbId:'134939' },
+    steelers:   { name:'Steelers',    sub:"NFL · Pittsburgh · '26 Season",  accent:'#101820', badgeStyle:'background:#101820; color:#FFB612;', badgeText:'PIT',  sportsdbId:'134925' },
+    dolphins:   { name:'Dolphins',    sub:"NFL · Miami · '26 Season",       accent:'#008E97', badgeStyle:'background:#008E97; color:#F58220;', badgeText:'MIA',  sportsdbId:'134919' },
+
+    cavaliers:  { name:'Cavaliers',   sub:"NBA · Cleveland · '26/'27 Season", accent:'#860038', badgeStyle:'background:#860038; color:#FDBB30;', badgeText:'CLE',  sportsdbId:'134871' },
+    nuggets:    { name:'Nuggets',     sub:"NBA · Denver · '26/'27 Season",   accent:'#0E2240', badgeStyle:'background:#0E2240; color:#FEC524;', badgeText:'DEN',  sportsdbId:'134885' },
+    mavericks:  { name:'Mavs',        sub:"NBA · Dallas · '26/'27 Season",   accent:'#00538C', badgeStyle:'background:#00538C; color:#B8C4CA;', badgeText:'DAL',  sportsdbId:'134875' },
+
+    lightning:  { name:'Lightning',   sub:"NHL · Tampa Bay · '26/'27 Season", accent:'#002868', badgeStyle:'background:#002868; color:#FFFFFF;', badgeText:'TBL',  sportsdbId:'134836' },
+    flyers:     { name:'Flyers',      sub:"NHL · Philadelphia · '26/'27 Season", accent:'#F74902', badgeStyle:'background:#F74902; color:#000000;', badgeText:'PHI',  sportsdbId:'134843' },
+    redwings:   { name:'Red Wings',   sub:"NHL · Detroit · '26/'27 Season",  accent:'#CE1126', badgeStyle:'background:#CE1126; color:#FFFFFF;', badgeText:'DET',  sportsdbId:'134832' },
+
+    cubs:       { name:'Cubs',        sub:"MLB · Chicago · '27 Season",      accent:'#0E3386', badgeStyle:'background:#0E3386; color:#CC3433;', badgeText:'CHC',  sportsdbId:'135269' },
+    padres:     { name:'Padres',      sub:"MLB · San Diego · '27 Season",    accent:'#2F241D', badgeStyle:'background:#2F241D; color:#FFC425;', badgeText:'SD',   sportsdbId:'135278' },
+    nationals:  { name:'Nationals',   sub:"MLB · Washington · '27 Season",   accent:'#AB0003', badgeStyle:'background:#AB0003; color:#FFFFFF;', badgeText:'WSH',  sportsdbId:'135281' },
+
+    valkyries:  { name:'Valkyries',   sub:"WNBA · Golden State · '27 Season", accent:'#8A6BAF', badgeStyle:'background:#000000; color:#8A6BAF;', badgeText:'GSV',  sportsdbId:'150722' },
+
+    oregon:     { name:'Oregon',      sub:"College Football · '26 Season",  accent:'#154733', badgeStyle:'background:#154733; color:#FEE123;', badgeText:'ORE',  sportsdbId:'136938', recentLabel:'Results So Far' },
+    texasam:    { name:'Texas A&M',   sub:"College Football · '26 Season",  accent:'#500000', badgeStyle:'background:#500000; color:#FFFFFF;', badgeText:'A&M',  sportsdbId:'136959', recentLabel:'Results So Far' },
+    arizona:    { name:'Arizona',     sub:"College Football · '26 Season",  accent:'#AB0520', badgeStyle:'background:#AB0520; color:#0C234B;', badgeText:'ARIZ', sportsdbId:'136171', recentLabel:'Results So Far' },
+
+    // TheSportsDB doesn't carry a distinct entry for these three
+    // schools' basketball programs (only their football teams) —
+    // so no live fetch is attempted for them yet.
+    houston:    { name:'Houston',     sub:'College Basketball · Cougars',      accent:'#C8102E', badgeStyle:'background:#C8102E; color:#FFFFFF;', badgeText:'HOU', sportsdbId:null },
+    purdue:     { name:'Purdue',      sub:'College Basketball · Boilermakers', accent:'#000000', badgeStyle:'background:#000000; color:#CEB888;', badgeText:'PUR', sportsdbId:null },
+    utahstate:  { name:'Utah State',  sub:'College Basketball · Aggies',       accent:'#0F2439', badgeStyle:'background:#0F2439; color:#FFFFFF;', badgeText:'USU', sportsdbId:null }
   };
 
   const LEAGUE_SCORING = {
@@ -774,8 +749,8 @@
       rules: [
         { label: 'Make the playoffs', pts: 1 },
         { label: 'Top-two regular-season record', pts: 2 },
-        { label: 'Reach Commissioner\u2019s Cup Final', pts: 1 },
-        { label: 'Win Commissioner\u2019s Cup', pts: 2 },
+        { label: 'Reach Commissioner’s Cup Final', pts: 1 },
+        { label: 'Win Commissioner’s Cup', pts: 2 },
         { label: 'Reach the semifinals', pts: 2 },
         { label: 'Reach the Finals', pts: 3 },
         { label: 'Win the Finals', pts: 5 },
@@ -795,7 +770,7 @@
         { label: 'Make the CFP semifinal', pts: 2 },
         { label: 'Make National Championship', pts: 3 },
         { label: 'Win National Championship', pts: 5 },
-        { label: 'Don\u2019t make a bowl', pts: -2 },
+        { label: 'Don’t make a bowl', pts: -2 },
         { label: 'Finish last in conference', pts: -3 }
       ]
     },
@@ -810,7 +785,7 @@
         { label: 'Make Elite Eight', pts: 2 },
         { label: 'Make National Championship game', pts: 3 },
         { label: 'Win National Championship', pts: 5 },
-        { label: 'Don\u2019t make NCAA tournament', pts: -2 },
+        { label: 'Don’t make NCAA tournament', pts: -2 },
         { label: 'Finish last in conference', pts: -3 }
       ]
     }
@@ -844,63 +819,175 @@
     document.getElementById('modal-overlay').classList.add('open');
   }
 
-  function openTeamModal(teamKey){
-    const data = TEAM_DATA[teamKey];
-    if(!data) return;
+  // ---- Live data helpers ----
 
-    const formHtml = data.form.map(f => `
+  async function fetchJSON(url){
+    try {
+      const res = await fetch(url);
+      if(!res.ok) return null;
+      return await res.json();
+    } catch (e){
+      return null;
+    }
+  }
+
+  function ordinal(n){
+    n = parseInt(n, 10);
+    if(isNaN(n)) return '—';
+    const s = ['th','st','nd','rd'], v = n % 100;
+    return n + (s[(v - 20) % 10] || s[v] || s[0]);
+  }
+
+  function formatKickoff(iso){
+    if(!iso) return '';
+    const d = new Date(iso.includes('Z') ? iso : iso + 'Z');
+    if(isNaN(d.getTime())) return '';
+    return d.toLocaleString('en-US', { weekday:'short', month:'short', day:'numeric', hour:'numeric', minute:'2-digit', timeZoneName:'short' });
+  }
+
+  function renderStats(meta, info, table, id){
+    const el = document.getElementById('live-stats');
+    if(!el) return;
+
+    const row = table && table.table ? table.table.find(r => r.idTeam === id) : null;
+    if(row){
+      el.innerHTML = `
+        <div class="stat-cell"><div class="num">${ordinal(row.intRank)}</div><div class="lbl">Position</div></div>
+        <div class="stat-cell"><div class="num">${row.intPoints}</div><div class="lbl">Points</div></div>
+        <div class="stat-cell"><div class="num">${row.intWin}-${row.intDraw}-${row.intLoss}</div><div class="lbl">W-D-L</div></div>
+      `;
+      return;
+    }
+
+    const team = info && info.teams && info.teams[0];
+    if(team){
+      el.innerHTML = `
+        <div class="stat-cell"><div class="num">${team.strSport || '—'}</div><div class="lbl">Sport</div></div>
+        <div class="stat-cell"><div class="num">${team.intFormedYear || '—'}</div><div class="lbl">Founded</div></div>
+        <div class="stat-cell"><div class="num" style="font-size:14px;">${team.strStadium || '—'}</div><div class="lbl">Home</div></div>
+      `;
+      return;
+    }
+
+    el.innerHTML = `<div class="stat-cell" style="flex:1;"><div class="lbl">Live stats unavailable right now</div></div>`;
+  }
+
+  function renderForm(meta, last, id){
+    const el = document.getElementById('live-form');
+    if(!el) return;
+
+    const evt = last && last.results && last.results[0];
+    if(!evt){
+      el.innerHTML = `<div class="loading-note">No recent result found.</div>`;
+      return;
+    }
+
+    const isHome = String(evt.idHomeTeam) === String(id);
+    const opponent = isHome ? evt.strAwayTeam : evt.strHomeTeam;
+    const own = isHome ? evt.intHomeScore : evt.intAwayScore;
+    const opp = isHome ? evt.intAwayScore : evt.intHomeScore;
+
+    let result = 'd', label = 'D';
+    if(own !== null && opp !== null && own !== undefined && opp !== undefined){
+      if(parseInt(own, 10) > parseInt(opp, 10)){ result = 'w'; label = 'W'; }
+      else if(parseInt(own, 10) < parseInt(opp, 10)){ result = 'l'; label = 'L'; }
+    }
+
+    el.innerHTML = `
       <div class="form-item">
-        <div class="form-pill ${f.result}">${f.label}</div>
+        <div class="form-pill ${result}">${label}</div>
         <div class="form-detail">
-          <span class="opp">${f.opponent}</span>
-          <span class="meta">${f.where}</span>
+          <span class="opp">${opponent || 'TBD'}</span>
+          <span class="meta">${isHome ? 'Home' : 'Away'}${evt.dateEvent ? ' · ' + evt.dateEvent : ''}</span>
         </div>
-        <div class="form-score">${f.score}</div>
+        <div class="form-score">${own ?? '–'}–${opp ?? '–'}</div>
       </div>
-    `).join('');
+    `;
+  }
 
-    const statsHtml = data.stats.map(s => `
-      <div class="stat-cell">
-        <div class="num">${s.num}</div>
-        <div class="lbl">${s.lbl}</div>
+  function renderNext(meta, next, id){
+    const el = document.getElementById('live-next');
+    if(!el) return;
+
+    const evt = next && next.events && next.events[0];
+    if(!evt){
+      el.innerHTML = `<div class="loading-note">No upcoming match scheduled yet.</div>`;
+      return;
+    }
+
+    const isHome = String(evt.idHomeTeam) === String(id);
+    const opponent = isHome ? evt.strAwayTeam : evt.strHomeTeam;
+
+    el.innerHTML = `
+      <div class="nm-left">
+        <div class="nm-teams">${isHome ? 'vs' : 'at'} ${opponent || 'TBD'}</div>
+        <div class="nm-when">${formatKickoff(evt.strTimestamp)}${isHome ? ' · Home' : ' · Away'}</div>
       </div>
-    `).join('');
+    `;
+  }
 
-    const probHtml = data.next.prob ? `
-          <div class="nm-prob">
-            ${data.next.prob}
-            <div class="lbl">Win Prob.</div>
-          </div>` : '';
+  async function loadLiveTeamData(teamKey){
+    const meta = TEAM_META[teamKey];
+    if(!meta || !meta.sportsdbId) return;
+    const id = meta.sportsdbId;
 
-    document.getElementById('modal-content').innerHTML = `
-      <div class="modal-accent" style="background:${data.accent};"></div>
+    const [info, last, next, table] = await Promise.all([
+      fetchJSON(`${API_BASE}lookupteam.php?id=${id}`),
+      fetchJSON(`${API_BASE}eventslast.php?id=${id}`),
+      fetchJSON(`${API_BASE}eventsnext.php?id=${id}`),
+      meta.leagueId ? fetchJSON(`${API_BASE}lookuptable.php?l=${meta.leagueId}&s=${meta.season}`) : Promise.resolve(null)
+    ]);
+
+    // If the modal moved on to a different team while this was loading, bail.
+    if(document.getElementById('modal-content').dataset.activeTeam !== teamKey) return;
+
+    renderStats(meta, info, table, id);
+    renderForm(meta, last, id);
+    renderNext(meta, next, id);
+  }
+
+  function openTeamModal(teamKey){
+    const meta = TEAM_META[teamKey];
+    if(!meta) return;
+
+    const modalContent = document.getElementById('modal-content');
+    modalContent.dataset.activeTeam = teamKey;
+
+    const hasLive = !!meta.sportsdbId;
+
+    modalContent.innerHTML = `
+      <div class="modal-accent" style="background:${meta.accent};"></div>
       <div class="modal-head">
-        <div class="badge" style="${data.badgeStyle}">${data.badgeText}</div>
+        <div class="badge" style="${meta.badgeStyle}">${meta.badgeText}</div>
         <div>
-          <h2>${data.name}</h2>
-          <div class="modal-sub">${data.sub}</div>
+          <h2>${meta.name}</h2>
+          <div class="modal-sub">${meta.sub}${hasLive ? ' <span class="live-badge">LIVE</span>' : ''}</div>
         </div>
         <button class="modal-close" onclick="closeTeamModal()">&times;</button>
       </div>
-      <div class="stat-strip">${statsHtml}</div>
-      <div class="modal-body">
-        <div class="modal-section-title">${data.recentLabel || 'Last 3 Matches'}</div>
-        <div class="form-list">${formHtml}</div>
-        <div class="modal-section-title">Next Match</div>
-        <div class="next-match">
-          <div class="nm-left">
-            <div class="nm-teams">${data.next.matchup}</div>
-            <div class="nm-when">${data.next.when}</div>
-          </div>${probHtml}
+      ${hasLive ? `
+        <div class="stat-strip" id="live-stats"><div class="stat-cell" style="flex:1;"><div class="lbl">Loading…</div></div></div>
+        <div class="modal-body">
+          <div class="modal-section-title">${meta.recentLabel || 'Most Recent Result'}</div>
+          <div class="form-list" id="live-form"><div class="loading-note">Loading…</div></div>
+          <div class="modal-section-title">Next Match</div>
+          <div class="next-match" id="live-next"><div class="loading-note">Loading…</div></div>
         </div>
-      </div>
+      ` : `
+        <div class="modal-body">
+          <div class="no-live-note">Live results for ${meta.name} aren't available from our current data source (TheSportsDB doesn't carry a separate entry for this program) — showing placeholder space here for now.</div>
+        </div>
+      `}
     `;
 
     document.getElementById('modal-overlay').classList.add('open');
+
+    if(hasLive) loadLiveTeamData(teamKey);
   }
 
   function closeTeamModal(){
     document.getElementById('modal-overlay').classList.remove('open');
+    document.getElementById('modal-content').dataset.activeTeam = '';
   }
 
   document.addEventListener('keydown', (e) => {
