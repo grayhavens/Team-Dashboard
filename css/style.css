@@ -20,7 +20,7 @@ body{
   background-size: 16px 16px;
   color: var(--ink);
   font-family: 'Inter', sans-serif;
-  padding: 24px 24px calc(var(--nav-h) + 24px + env(safe-area-inset-bottom));
+  padding: calc(env(safe-area-inset-top) + 24px) 24px calc(var(--nav-h) + 24px + env(safe-area-inset-bottom));
   min-height: 100vh;
   overscroll-behavior-y: contain;
 }
@@ -205,7 +205,7 @@ body{
 }
 
 @media (max-width: 700px){
-  body{ padding: 16px 16px calc(var(--nav-h) + 16px + env(safe-area-inset-bottom)); }
+  body{ padding: calc(env(safe-area-inset-top) + 16px) 16px calc(var(--nav-h) + 16px + env(safe-area-inset-bottom)); }
   .masthead h1{ font-size: 30px; }
   .leagues{ grid-template-columns: 1fr; gap: 16px; }
 }
