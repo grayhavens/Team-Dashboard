@@ -471,6 +471,14 @@
     color: var(--sub);
     padding: 4px 0;
   }
+
+  .updated-note{
+    font-size: 10.5px;
+    color: var(--sub);
+    text-align: right;
+    margin-top: 10px;
+    letter-spacing: 0.1px;
+  }
 </style>
 </head>
 <body>
@@ -621,8 +629,10 @@
   /* ============================================================
      LIVE DATA: TheSportsDB v1 API
      Using the public free test key "123" — rate-limited to 30
-     requests/min, which is plenty for a personal dashboard where
-     data only loads when you click a team (not all 21 at once).
+     requests/min. Each team's data is cached in memory after its
+     first fetch and refreshed on a staggered background schedule
+     (see bottom of file) rather than re-fetched on every click, so
+     opening a team you've already viewed this session is instant.
      If you upgrade to a premium key later (thesportsdb.com,
      ~$9/mo), just swap the "123" below for your own key.
      ============================================================ */
@@ -819,7 +829,9 @@
     document.getElementById('modal-overlay').classList.add('open');
   }
 
-  // ---- Live data helpers ----
+  // ---- Live data: fetch, cache, render ----
+
+  const liveDataCache = {};   // teamKey -> { info, last, next, table, fetchedAt }
 
   async function fetchJSON(url){
     try {
@@ -845,11 +857,35 @@
     return d.toLocaleString('en-US', { weekday:'short', month:'short', day:'numeric', hour:'numeric', minute:'2-digit', timeZoneName:'short' });
   }
 
-  function renderStats(meta, info, table, id){
+  function formatUpdatedAt(date){
+    if(!date) return '';
+    // Uses the viewer's own clock, shown in Central time either way
+    // (CST or CDT, whichever is actually in effect).
+    return date.toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit', timeZone:'America/Chicago', timeZoneName:'short' });
+  }
+
+  async function fetchTeamBundle(teamKey){
+    const meta = TEAM_META[teamKey];
+    if(!meta || !meta.sportsdbId) return null;
+    const id = meta.sportsdbId;
+
+    const [info, last, next, table] = await Promise.all([
+      fetchJSON(`${API_BASE}lookupteam.php?id=${id}`),
+      fetchJSON(`${API_BASE}eventslast.php?id=${id}`),
+      fetchJSON(`${API_BASE}eventsnext.php?id=${id}`),
+      meta.leagueId ? fetchJSON(`${API_BASE}lookuptable.php?l=${meta.leagueId}&s=${meta.season}`) : Promise.resolve(null)
+    ]);
+
+    const bundle = { info, last, next, table, fetchedAt: new Date() };
+    liveDataCache[teamKey] = bundle;
+    return bundle;
+  }
+
+  function renderStats(id, bundle){
     const el = document.getElementById('live-stats');
     if(!el) return;
 
-    const row = table && table.table ? table.table.find(r => r.idTeam === id) : null;
+    const row = bundle.table && bundle.table.table ? bundle.table.table.find(r => r.idTeam === id) : null;
     if(row){
       el.innerHTML = `
         <div class="stat-cell"><div class="num">${ordinal(row.intRank)}</div><div class="lbl">Position</div></div>
@@ -859,7 +895,7 @@
       return;
     }
 
-    const team = info && info.teams && info.teams[0];
+    const team = bundle.info && bundle.info.teams && bundle.info.teams[0];
     if(team){
       el.innerHTML = `
         <div class="stat-cell"><div class="num">${team.strSport || '—'}</div><div class="lbl">Sport</div></div>
@@ -872,11 +908,11 @@
     el.innerHTML = `<div class="stat-cell" style="flex:1;"><div class="lbl">Live stats unavailable right now</div></div>`;
   }
 
-  function renderForm(meta, last, id){
+  function renderForm(id, bundle){
     const el = document.getElementById('live-form');
     if(!el) return;
 
-    const evt = last && last.results && last.results[0];
+    const evt = bundle.last && bundle.last.results && bundle.last.results[0];
     if(!evt){
       el.innerHTML = `<div class="loading-note">No recent result found.</div>`;
       return;
@@ -905,11 +941,11 @@
     `;
   }
 
-  function renderNext(meta, next, id){
+  function renderNext(id, bundle){
     const el = document.getElementById('live-next');
     if(!el) return;
 
-    const evt = next && next.events && next.events[0];
+    const evt = bundle.next && bundle.next.events && bundle.next.events[0];
     if(!evt){
       el.innerHTML = `<div class="loading-note">No upcoming match scheduled yet.</div>`;
       return;
@@ -926,24 +962,32 @@
     `;
   }
 
-  async function loadLiveTeamData(teamKey){
+  function renderUpdatedAt(bundle){
+    const el = document.getElementById('live-updated');
+    if(!el || !bundle || !bundle.fetchedAt) return;
+    el.textContent = `Last updated: ${formatUpdatedAt(bundle.fetchedAt)}`;
+  }
+
+  function renderLiveBundle(teamKey, bundle){
     const meta = TEAM_META[teamKey];
-    if(!meta || !meta.sportsdbId) return;
-    const id = meta.sportsdbId;
+    if(!meta || !bundle) return;
+    renderStats(meta.sportsdbId, bundle);
+    renderForm(meta.sportsdbId, bundle);
+    renderNext(meta.sportsdbId, bundle);
+    renderUpdatedAt(bundle);
+  }
 
-    const [info, last, next, table] = await Promise.all([
-      fetchJSON(`${API_BASE}lookupteam.php?id=${id}`),
-      fetchJSON(`${API_BASE}eventslast.php?id=${id}`),
-      fetchJSON(`${API_BASE}eventsnext.php?id=${id}`),
-      meta.leagueId ? fetchJSON(`${API_BASE}lookuptable.php?l=${meta.leagueId}&s=${meta.season}`) : Promise.resolve(null)
-    ]);
-
+  async function openLiveTeam(teamKey){
+    const bundle = await fetchTeamBundle(teamKey);
     // If the modal moved on to a different team while this was loading, bail.
     if(document.getElementById('modal-content').dataset.activeTeam !== teamKey) return;
 
-    renderStats(meta, info, table, id);
-    renderForm(meta, last, id);
-    renderNext(meta, next, id);
+    if(bundle){
+      renderLiveBundle(teamKey, bundle);
+    } else {
+      const el = document.getElementById('live-form');
+      if(el) el.innerHTML = `<div class="loading-note">Unable to load live data right now — try again in a moment.</div>`;
+    }
   }
 
   function openTeamModal(teamKey){
@@ -954,6 +998,7 @@
     modalContent.dataset.activeTeam = teamKey;
 
     const hasLive = !!meta.sportsdbId;
+    const cached = hasLive ? liveDataCache[teamKey] : null;
 
     modalContent.innerHTML = `
       <div class="modal-accent" style="background:${meta.accent};"></div>
@@ -966,12 +1011,13 @@
         <button class="modal-close" onclick="closeTeamModal()">&times;</button>
       </div>
       ${hasLive ? `
-        <div class="stat-strip" id="live-stats"><div class="stat-cell" style="flex:1;"><div class="lbl">Loading…</div></div></div>
+        <div class="stat-strip" id="live-stats">${cached ? '' : '<div class="stat-cell" style="flex:1;"><div class="lbl">Loading…</div></div>'}</div>
         <div class="modal-body">
           <div class="modal-section-title">${meta.recentLabel || 'Most Recent Result'}</div>
-          <div class="form-list" id="live-form"><div class="loading-note">Loading…</div></div>
+          <div class="form-list" id="live-form">${cached ? '' : '<div class="loading-note">Loading…</div>'}</div>
           <div class="modal-section-title">Next Match</div>
-          <div class="next-match" id="live-next"><div class="loading-note">Loading…</div></div>
+          <div class="next-match" id="live-next">${cached ? '' : '<div class="loading-note">Loading…</div>'}</div>
+          <div class="updated-note" id="live-updated"></div>
         </div>
       ` : `
         <div class="modal-body">
@@ -982,7 +1028,10 @@
 
     document.getElementById('modal-overlay').classList.add('open');
 
-    if(hasLive) loadLiveTeamData(teamKey);
+    if(hasLive){
+      if(cached) renderLiveBundle(teamKey, cached);
+      else openLiveTeam(teamKey);
+    }
   }
 
   function closeTeamModal(){
@@ -993,6 +1042,32 @@
   document.addEventListener('keydown', (e) => {
     if(e.key === 'Escape') closeTeamModal();
   });
+
+  /* ---- Staggered background refresh ----
+     Refreshing all 18 live teams at once every few minutes would
+     burst 50-70 requests in a single second. Instead we refresh one
+     team at a time on a rotating schedule, so the whole board cycles
+     through a refresh roughly every 15 minutes while only ever
+     sending a handful of requests per minute. If a team's modal
+     happens to be open when its turn comes up, it updates live and
+     the "Last updated" time ticks forward right in front of you. */
+  const LIVE_TEAM_KEYS = Object.keys(TEAM_META).filter(k => TEAM_META[k].sportsdbId);
+  const REFRESH_CYCLE_MS = 15 * 60 * 1000;
+  const REFRESH_STEP_MS = LIVE_TEAM_KEYS.length ? REFRESH_CYCLE_MS / LIVE_TEAM_KEYS.length : REFRESH_CYCLE_MS;
+  let refreshCursor = 0;
+
+  async function backgroundRefreshTick(){
+    if(LIVE_TEAM_KEYS.length === 0) return;
+    const teamKey = LIVE_TEAM_KEYS[refreshCursor % LIVE_TEAM_KEYS.length];
+    refreshCursor++;
+
+    const bundle = await fetchTeamBundle(teamKey);
+    if(bundle && document.getElementById('modal-content').dataset.activeTeam === teamKey){
+      renderLiveBundle(teamKey, bundle);
+    }
+  }
+
+  setInterval(backgroundRefreshTick, REFRESH_STEP_MS);
 </script>
 </body>
 </html>
