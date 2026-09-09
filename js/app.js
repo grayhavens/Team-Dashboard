@@ -47,8 +47,11 @@ function renderBoard(){
     `;
   }).join('');
 
-  document.getElementById('team-tally').textContent = `${LEAGUES.length} Leagues · ${totalTeams} Teams`;
+  document.getElementById('team-tally').textContent = `${totalTeams} teams · ${LEAGUES.length} leagues`;
 }
+
+const CLOSE_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6L18 18"></path><path d="M18 6L6 18"></path></svg>';
+const CHECK_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="#0A0B0D" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"></path></svg>';
 
 function scrollToLeague(key){
   const el = document.getElementById('league-' + key);
@@ -75,7 +78,7 @@ function openLeagueModal(leagueKey){
         <h2>${data.name}</h2>
         <div class="modal-sub">${data.full}</div>
       </div>
-      <button class="modal-close" onclick="closeTeamModal()">&times;</button>
+      <button class="modal-close" onclick="closeTeamModal()">${CLOSE_ICON_SVG}</button>
     </div>
     <div class="modal-body" style="padding-top: 18px;">
       <div class="scoring-list">${rulesHtml}</div>
@@ -144,6 +147,7 @@ function trackerSectionHtml(teamKey){
     const achieved = isAchieved(teamKey, r.label);
     return `
       <button class="tracker-item ${achieved ? 'achieved' : ''}" onclick="toggleAchievementByIndex('${teamKey}', ${i})">
+        <div class="tracker-check">${achieved ? CHECK_ICON_SVG : ''}</div>
         <div class="tracker-label">${r.label}</div>
         <div class="tracker-value ${r.pts >= 0 ? 'pos' : 'neg'}">${r.pts >= 0 ? '+' : ''}${r.pts} pt${Math.abs(r.pts) === 1 ? '' : 's'}</div>
       </button>
@@ -185,7 +189,7 @@ function renderStandings(){
           <div class="team-name">${r.meta.name}</div>
           <div class="team-sub">${r.meta.boardSub}</div>
         </div>
-        <div class="standings-points ${r.pts === 0 ? 'zero' : ''}">${r.pts > 0 ? '+' : ''}${r.pts} pt${Math.abs(r.pts) === 1 ? '' : 's'}</div>
+        <div class="standings-points ${r.pts === 0 ? 'zero' : (r.pts < 0 ? 'neg' : '')}">${r.pts > 0 ? '+' : ''}${r.pts} pt${Math.abs(r.pts) === 1 ? '' : 's'}</div>
       </div>
     `).join('');
 
