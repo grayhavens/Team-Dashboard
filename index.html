@@ -22,6 +22,7 @@
       <div class="page-header-top">
         <img class="app-logo" src="icons/logo-header.png" alt="">
         <h1>Boxscore</h1>
+        <select class="draft-team-picker" id="draft-team-picker" onchange="setDraftTeam(this.value)"></select>
       </div>
       <div class="page-sub" id="team-tally">&mdash; teams &middot; &mdash; leagues</div>
     </div>
@@ -31,10 +32,18 @@
 
   <div id="view-standings" class="view">
     <div class="page-header">
-      <h1>Standings</h1>
-      <div class="page-sub">Tap a team to update its checklist</div>
+      <h1>League Standings</h1>
+      <div class="page-sub">Real per-league tables &mdash; drafted teams show who picked them</div>
     </div>
     <div id="standings-content"></div>
+  </div>
+
+  <div id="view-overall" class="view">
+    <div class="page-header">
+      <h1>Overall</h1>
+      <div class="page-sub">All 10 drafters, ranked by total points across every league</div>
+    </div>
+    <div id="overall-content"></div>
   </div>
 
 </div>
@@ -49,11 +58,15 @@
 <nav class="tab-bar">
   <button class="tab-btn active" data-view="board" onclick="switchView('board')">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="8" height="8" rx="2"></rect><rect x="13" y="3" width="8" height="8" rx="2"></rect><rect x="3" y="13" width="8" height="8" rx="2"></rect><rect x="13" y="13" width="8" height="8" rx="2"></rect></svg>
-    <span class="tab-label">Board</span>
+    <span class="tab-label">Teams</span>
   </button>
   <button class="tab-btn" data-view="standings" onclick="switchView('standings')">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V13"></path><path d="M12 20V7"></path><path d="M20 20V10"></path></svg>
     <span class="tab-label">Standings</span>
+  </button>
+  <button class="tab-btn" data-view="overall" onclick="switchView('overall')">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="6"></circle><path d="M8.5 13.5L7 22l5-3 5 3-1.5-8.5"></path></svg>
+    <span class="tab-label">Overall</span>
   </button>
 </nav>
 

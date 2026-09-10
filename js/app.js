@@ -11,6 +11,41 @@
 const API_BASE = 'https://www.thesportsdb.com/api/v1/json/123/';
 const ACHIEVEMENTS_KEY = 'teamDashboardAchievements';
 
+// ---- Draft team selection ----
+// Which drafter's roster is currently shown on the Board/Standings
+// views. Persisted in localStorage so a reload stays on the same
+// person. (A URL-shareable version of this is planned separately.)
+const CURRENT_DRAFT_TEAM_KEY = 'teamDashboardCurrentDraftTeam';
+
+function loadCurrentDraftTeam(){
+  try {
+    const saved = localStorage.getItem(CURRENT_DRAFT_TEAM_KEY);
+    if(saved && DRAFT_TEAMS.some(d => d.id === saved)) return saved;
+  } catch (e){}
+  return DRAFT_TEAMS[0].id;
+}
+
+let currentDraftTeamId = loadCurrentDraftTeam();
+
+function teamsForCurrentDraftTeam(league){
+  return league.teams.filter(teamKey => TEAM_META[teamKey].draftTeamId === currentDraftTeamId);
+}
+
+function setDraftTeam(id){
+  if(!DRAFT_TEAMS.some(d => d.id === id)) return;
+  currentDraftTeamId = id;
+  try { localStorage.setItem(CURRENT_DRAFT_TEAM_KEY, id); } catch (e){}
+  renderBoard();
+  const standingsView = document.getElementById('view-standings');
+  if(standingsView && standingsView.classList.contains('active')) renderStandings();
+}
+
+function renderDraftTeamPicker(){
+  const el = document.getElementById('draft-team-picker');
+  if(!el) return;
+  el.innerHTML = DRAFT_TEAMS.map(d => `<option value="${d.id}" ${d.id === currentDraftTeamId ? 'selected' : ''}>${d.name}</option>`).join('');
+}
+
 // ---- Board rendering ----
 
 function renderBoard(){
@@ -18,11 +53,14 @@ function renderBoard(){
   const leaguesEl = document.getElementById('leagues');
   let totalTeams = 0;
 
+  renderDraftTeamPicker();
+
   chipsEl.innerHTML = LEAGUES.map(l => `<div class="filter-chip" onclick="scrollToLeague('${l.key}')">${l.label}</div>`).join('');
 
   leaguesEl.innerHTML = LEAGUES.map(league => {
-    totalTeams += league.teams.length;
-    const teamsHtml = league.teams.map(teamKey => {
+    const leagueTeams = teamsForCurrentDraftTeam(league);
+    totalTeams += leagueTeams.length;
+    const teamsHtml = leagueTeams.map(teamKey => {
       const meta = TEAM_META[teamKey];
       return `
         <div class="team clickable" onclick="openTeamModal('${teamKey}')">
@@ -167,50 +205,115 @@ function renderTrackerSection(teamKey){
   el.innerHTML = trackerSectionHtml(teamKey);
 }
 
+// ---- League Standings: real per-league tables ----
+// Only EPL is wired to live data right now — TheSportsDB's free demo
+// key returns a usable (if capped) table for it. Every other league
+// came back empty when tested against the free key, so those just
+// show a "no data" placeholder rather than pretending to fetch.
+// If this moves to a premium key later, wire the rest up the same
+// way EPL is done here.
+const EPL_LEAGUE_ID = '4328';
+const EPL_API_SEASON = '2026-2027';
+const eplStandingsCache = { table: null, error: false, loading: false };
+
+// A few real club names don't match our shorthand roster names
+// (e.g. "Man City" vs the API's "Manchester City") — normalize both
+// sides before comparing so "Drafted by" still finds the right owner.
+const TEAM_NAME_ALIASES = {
+  'man city': 'manchester city',
+  'man utd': 'manchester united',
+  'man united': 'manchester united',
+  'spurs': 'tottenham hotspur',
+  'afc bournemouth': 'bournemouth'
+};
+
+function normalizeTeamName(name){
+  let n = (name || '').toLowerCase().trim().replace(/\bafc\b/g, '').replace(/\bfc\b/g, '').replace(/\s+/g, ' ').trim();
+  return TEAM_NAME_ALIASES[n] || n;
+}
+
+function findDraftedTeamByName(leagueKey, realName){
+  const league = LEAGUES.find(l => l.key === leagueKey);
+  if(!league) return null;
+  const target = normalizeTeamName(realName);
+  return league.teams.find(teamKey => {
+    const candidate = normalizeTeamName(TEAM_META[teamKey].name);
+    return candidate === target || target.includes(candidate) || candidate.includes(target);
+  }) || null;
+}
+
+function abbrFromName(name){
+  const words = (name || '').trim().split(/\s+/).filter(Boolean);
+  if(words.length >= 2) return words.map(w => w[0]).join('').toUpperCase().slice(0, 4);
+  return (name || '').toUpperCase().slice(0, 3);
+}
+
+async function fetchEplStandingsTable(){
+  if(eplStandingsCache.table || eplStandingsCache.loading) return;
+  eplStandingsCache.loading = true;
+  const data = await fetchJSON(`${API_BASE}lookuptable.php?l=${EPL_LEAGUE_ID}&s=${EPL_API_SEASON}`);
+  eplStandingsCache.loading = false;
+  if(data && data.table && data.table.length) eplStandingsCache.table = data.table;
+  else eplStandingsCache.error = true;
+  renderStandings();
+}
+
+function renderStandingsRow(leagueKey, row){
+  const teamKey = findDraftedTeamByName(leagueKey, row.strTeam);
+  const meta = teamKey ? TEAM_META[teamKey] : null;
+  const badgeStyle = meta ? meta.badgeStyle : 'background: rgba(255,255,255,0.08); color: var(--text-sub); border-color: var(--hairline-strong);';
+  const badgeText = meta ? meta.badgeText : abbrFromName(row.strTeam);
+  const draftedByHtml = teamKey
+    ? `<div class="drafted-by-chip">${DRAFT_TEAMS.find(d => d.id === meta.draftTeamId).name}</div>`
+    : '';
+
+  return `
+    <div class="standings-row ${teamKey ? 'clickable' : ''}" ${teamKey ? `onclick="openTeamModal('${teamKey}')"` : ''}>
+      <div class="standings-rank">${row.intRank}</div>
+      <div class="badge" style="${badgeStyle}">${badgeText}</div>
+      <div class="team-main">
+        <div class="team-name">${row.strTeam}</div>
+        <div class="team-sub">${row.intWin}-${row.intDraw}-${row.intLoss} &middot; ${row.intPoints} pts</div>
+      </div>
+      ${draftedByHtml}
+    </div>
+  `;
+}
+
+function leagueBlockHtml(league, bodyHtml){
+  return `
+    <div class="league">
+      <div class="league-tab">
+        <div class="league-tab-left">${league.label} <div class="scoring-chip" onclick="openLeagueModal('${league.key}')">Scoring</div></div>
+        <span class="n">${league.season}</span>
+      </div>
+      ${bodyHtml}
+    </div>
+  `;
+}
+
 function renderStandings(){
   const container = document.getElementById('standings-content');
   if(!container) return;
 
-  let grandTotal = 0;
+  const blocksHtml = LEAGUES.map(league => {
+    if(league.key !== 'epl'){
+      return leagueBlockHtml(league, `<div class="no-live-note">No data available.</div>`);
+    }
 
-  const leagueBlocks = LEAGUES.map(league => {
-    let leagueTotal = 0;
-    const rows = league.teams.map(teamKey => {
-      const pts = computeTeamPoints(teamKey);
-      leagueTotal += pts;
-      return { teamKey, meta: TEAM_META[teamKey], pts };
-    }).sort((a, b) => b.pts - a.pts);
-    grandTotal += leagueTotal;
+    if(eplStandingsCache.table){
+      return leagueBlockHtml(league, eplStandingsCache.table.map(row => renderStandingsRow('epl', row)).join(''));
+    }
 
-    const rowsHtml = rows.map(r => `
-      <div class="standings-row" onclick="openTeamModal('${r.teamKey}')">
-        <div class="badge" style="${r.meta.badgeStyle}">${r.meta.badgeText}</div>
-        <div class="team-main">
-          <div class="team-name">${r.meta.name}</div>
-          <div class="team-sub">${r.meta.boardSub}</div>
-        </div>
-        <div class="standings-points ${r.pts === 0 ? 'zero' : (r.pts < 0 ? 'neg' : '')}">${r.pts > 0 ? '+' : ''}${r.pts} pt${Math.abs(r.pts) === 1 ? '' : 's'}</div>
-      </div>
-    `).join('');
+    if(eplStandingsCache.error){
+      return leagueBlockHtml(league, `<div class="no-live-note">No data available.</div>`);
+    }
 
-    return `
-      <div class="league">
-        <div class="league-tab">
-          <div class="league-tab-left">${league.label}</div>
-          <span class="n standings-league-total">${leagueTotal > 0 ? '+' : ''}${leagueTotal} pts</span>
-        </div>
-        ${rowsHtml}
-      </div>
-    `;
+    fetchEplStandingsTable();
+    return leagueBlockHtml(league, `<div class="loading-note">Loading standings…</div>`);
   }).join('');
 
-  container.innerHTML = `
-    <div class="standings-total">
-      <div class="lbl">Total Points</div>
-      <div class="val">${grandTotal > 0 ? '+' : ''}${grandTotal}</div>
-    </div>
-    <div class="standings-grid">${leagueBlocks}</div>
-  `;
+  container.innerHTML = `<div class="standings-grid">${blocksHtml}</div>`;
 }
 
 // ---- Bottom tab navigation ----
@@ -219,6 +322,51 @@ function switchView(view){
   document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === 'view-' + view));
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.view === view));
   if(view === 'standings') renderStandings();
+  if(view === 'overall') renderOverallStandings();
+}
+
+// ---- Overall view: cross-drafter leaderboard ----
+
+function computeDraftTeamBreakdown(draftTeamId){
+  const perLeague = {};
+  let total = 0;
+  LEAGUES.forEach(league => {
+    const leaguePts = league.teams.reduce((sum, teamKey) => {
+      return TEAM_META[teamKey].draftTeamId === draftTeamId ? sum + computeTeamPoints(teamKey) : sum;
+    }, 0);
+    perLeague[league.key] = leaguePts;
+    total += leaguePts;
+  });
+  return { perLeague, total };
+}
+
+function renderOverallStandings(){
+  const container = document.getElementById('overall-content');
+  if(!container) return;
+
+  const rows = DRAFT_TEAMS.map(d => Object.assign({ id: d.id, name: d.name }, computeDraftTeamBreakdown(d.id)))
+    .sort((a, b) => b.total - a.total);
+
+  const rowsHtml = rows.map((r, i) => {
+    const chipsHtml = LEAGUES.map(l => {
+      const pts = r.perLeague[l.key];
+      const cls = pts > 0 ? 'pos' : (pts < 0 ? 'neg' : 'zero');
+      return `<span class="ob-chip ${cls}">${l.label} ${pts > 0 ? '+' : ''}${pts}</span>`;
+    }).join('');
+
+    return `
+      <div class="overall-row ${r.id === currentDraftTeamId ? 'current' : ''}" onclick="setDraftTeam('${r.id}'); switchView('board');">
+        <div class="overall-rank">${i + 1}</div>
+        <div class="overall-main">
+          <div class="overall-name">${r.name}</div>
+          <div class="overall-breakdown">${chipsHtml}</div>
+        </div>
+        <div class="overall-total ${r.total === 0 ? 'zero' : (r.total < 0 ? 'neg' : '')}">${r.total > 0 ? '+' : ''}${r.total} pt${Math.abs(r.total) === 1 ? '' : 's'}</div>
+      </div>
+    `;
+  }).join('');
+
+  container.innerHTML = `<div class="overall-list">${rowsHtml}</div>`;
 }
 
 // ---- Live data: fetch, cache, render ----
@@ -456,7 +604,7 @@ function openTeamModal(teamKey){
       </div>
     ` : `
       <div class="modal-body">
-        <div class="no-live-note">Live results for ${meta.name} aren't available from our current data source (TheSportsDB doesn't carry a separate entry for this program) — showing placeholder space here for now.</div>
+        <div class="no-live-note">Live results for ${meta.name} aren't hooked up yet — showing placeholder space here for now.</div>
         <div id="tracker-section">${tracker}</div>
       </div>
     `}
