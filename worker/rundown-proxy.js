@@ -1,12 +1,12 @@
 /* ============================================================
    DASHBOARD WORKER (Cloudflare Worker)
 
-   Two unrelated jobs live here, both because they need something
+   Three unrelated jobs live here, all because they need something
    server-side that GitHub Pages (pure static hosting) can't do:
 
    1. THERUNDOWN PROXY — TheRundown's API key is personal to your
       account and must never ship in client-side JS (unlike
-      TheSportsDB's public "123" test key) — see
+      TheSportsDB's old public "123" test key) — see
       https://docs.therundown.io/authentication. This holds that key
       server-side as a secret and forwards a small allowlist of
       read-only requests to TheRundown on the dashboard's behalf.
@@ -21,9 +21,24 @@
       who finds the endpoint could overwrite it. Add a shared secret
       here later if that ever becomes an actual problem.
 
+   3. THESPORTSDB PROXY — once on the premium tier, the API key is a
+      real paid credential (unlike the free "123" key, which is
+      public and meant to be embedded client-side) and must never
+      ship in client-side JS either. Forwards a small allowlist of
+      team/schedule/table requests to TheSportsDB on the dashboard's
+      behalf: V2 (header auth, https://www.thesportsdb.com/api/v2/json)
+      for team lookup and schedules, V1 (key embedded in the URL path,
+      like the old free key) for the league table — V2's docs don't
+      show a standings/table endpoint, and premium is documented to
+      raise V1's own limits too, so V1-with-the-premium-key is the
+      deliberate choice here rather than a fallback we forgot to
+      finish. Unverified until tested with a real key — see the
+      migration plan's Phase 1.
+
    Deploy (from this worker/ directory):
      npx wrangler login
      npx wrangler secret put THERUNDOWN_API_KEY
+     npx wrangler secret put SPORTSDB_API_KEY
      npx wrangler kv namespace create LEAGUE_FACTS
      (paste the printed id into wrangler.toml's kv_namespaces block)
      npx wrangler deploy
@@ -32,6 +47,8 @@
    ============================================================ */
 
 const RUNDOWN_BASE = 'https://api.therundown.io/api/v2';
+const SPORTSDB_V2_BASE = 'https://www.thesportsdb.com/api/v2/json';
+const SPORTSDB_V1_BASE = 'https://www.thesportsdb.com/api/v1/json';
 
 // Update this list if the dashboard's deployed origin changes (e.g. a
 // custom domain). The localhost entry is only here for local dev preview
@@ -112,6 +129,61 @@ async function handleRundownTeams(request, url, env, headers){
   return proxyToRundown(`/sports/${sportId}/teams`, env, headers);
 }
 
+async function proxyToSportsDbV2(sportsdbPath, env, headers){
+  const upstream = await fetch(`${SPORTSDB_V2_BASE}${sportsdbPath}`, {
+    headers: { 'X-API-KEY': env.SPORTSDB_API_KEY }
+  });
+  const body = await upstream.text();
+  return new Response(body, {
+    status: upstream.status,
+    headers: { ...headers, 'Content-Type': 'application/json' }
+  });
+}
+
+async function proxyToSportsDbV1(sportsdbPath, env, headers){
+  // V1 takes the key as a URL segment (same shape as the old public
+  // "123" key), not a header — this just substitutes the real premium
+  // key in that same slot.
+  const upstream = await fetch(`${SPORTSDB_V1_BASE}/${env.SPORTSDB_API_KEY}${sportsdbPath}`);
+  const body = await upstream.text();
+  return new Response(body, {
+    status: upstream.status,
+    headers: { ...headers, 'Content-Type': 'application/json' }
+  });
+}
+
+async function handleSportsDb(request, url, env, headers){
+  if(request.method !== 'GET'){
+    return new Response('Method not allowed', { status: 405, headers });
+  }
+
+  // Deliberately narrow allowlist — extend it only as new pieces of
+  // js/app.js actually need them, same discipline as the TheRundown
+  // routes above. Paths chosen from TheSportsDB's V2 docs; response
+  // shapes were unverified as of writing (see the migration plan) —
+  // curl these directly to confirm before building any client code
+  // against them.
+  let match;
+
+  if((match = url.pathname.match(/^\/sportsdb\/team\/(\d+)$/))){
+    return proxyToSportsDbV2(`/lookup/team/${match[1]}`, env, headers);
+  }
+  if((match = url.pathname.match(/^\/sportsdb\/schedule-next\/(\d+)$/))){
+    return proxyToSportsDbV2(`/schedule/next/team/${match[1]}`, env, headers);
+  }
+  if((match = url.pathname.match(/^\/sportsdb\/schedule-previous\/(\d+)$/))){
+    return proxyToSportsDbV2(`/schedule/previous/team/${match[1]}`, env, headers);
+  }
+  // No confirmed V2 standings endpoint exists — this deliberately
+  // stays on V1 with the premium key attached. See the header comment.
+  if((match = url.pathname.match(/^\/sportsdb\/table\/(\d+)\/([\w-]+)$/))){
+    const [, leagueId, season] = match;
+    return proxyToSportsDbV1(`/lookuptable.php?l=${leagueId}&s=${season}`, env, headers);
+  }
+
+  return new Response('Not found', { status: 404, headers });
+}
+
 async function handleLeagueFacts(request, env, leagueKey, headers){
   if(!KNOWN_LEAGUES.includes(leagueKey)){
     return new Response('Not found', { status: 404, headers });
@@ -156,6 +228,8 @@ export default {
 
     const factsMatch = url.pathname.match(/^\/facts\/([a-z]+)$/);
     if(factsMatch) return handleLeagueFacts(request, env, factsMatch[1], headers);
+
+    if(url.pathname.startsWith('/sportsdb/')) return handleSportsDb(request, url, env, headers);
 
     if(url.pathname.startsWith('/teams/')) return handleRundownTeams(request, url, env, headers);
 

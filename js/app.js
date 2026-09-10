@@ -112,7 +112,7 @@ async function fetchRundownEventForTeam(meta){
 // confirm a device is actually running the latest build rather than
 // a stale cached copy — compare what's on screen to the version
 // mentioned when a change ships.
-const APP_VERSION = '2026.09.10-13';
+const APP_VERSION = '2026.09.10-21';
 
 // ---- Draft team selection ----
 // Which drafter's roster is currently shown on the Board/Standings
@@ -149,6 +149,26 @@ function renderDraftTeamPicker(){
   el.innerHTML = DRAFT_TEAMS.map(d => `<option value="${d.id}" ${d.id === currentDraftTeamId ? 'selected' : ''}>${d.name}</option>`).join('');
 }
 
+// Renders a team's badge: the real crest image when meta.badgeUrl is
+// set, layered over the same colored-monogram box every team already
+// has — that box stays as the fallback (onerror removes the img,
+// revealing it) since hotlinked images can occasionally fail to load,
+// and it's what every team without a badgeUrl yet still uses as-is.
+function teamBadgeHtml(meta){
+  if(meta.badgeUrl){
+    // Real crests are transparent PNGs meant to sit on a light backdrop.
+    // Putting one over the team's own accent color looked fine for most
+    // teams, but broke badly for e.g. Liverpool — an all-red crest over
+    // Liverpool's near-identical red background was nearly invisible.
+    // White background instead, consistent regardless of a team's own
+    // brand color. data-fallback-* carries the original colored-monogram
+    // look over to the onerror handler, restored only if the hotlinked
+    // image actually fails to load.
+    return `<div class="badge badge-crest"><img src="${meta.badgeUrl}" alt="${meta.name}" data-fallback-style="${meta.badgeStyle}" data-fallback-text="${meta.badgeText}" onerror="const p=this.parentElement; p.className='badge'; p.setAttribute('style', this.dataset.fallbackStyle); p.textContent=this.dataset.fallbackText;"></div>`;
+  }
+  return `<div class="badge" style="${meta.badgeStyle}">${meta.badgeText}</div>`;
+}
+
 // ---- Board rendering ----
 
 function renderBoard(){
@@ -167,7 +187,7 @@ function renderBoard(){
       const meta = TEAM_META[teamKey];
       return `
         <div class="team clickable" onclick="openTeamModal('${teamKey}')">
-          <div class="badge" style="${meta.badgeStyle}">${meta.badgeText}</div>
+          ${teamBadgeHtml(meta)}
           <div class="team-main">
             <div class="team-name">${meta.name}</div>
             <div class="team-sub">${meta.boardSub}</div>
@@ -492,6 +512,17 @@ function computeTeamPoints(teamKey){
   return scoring.rules.reduce((sum, r) => sum + (achieved.includes(r.label) ? r.pts : 0), 0);
 }
 
+// The slice of a team's points that comes from current-standings rules
+// (rankAuto) rather than a real, locked-in fact — these can still move
+// as the table changes before the season ends. EPL-only for now: no
+// other league has a rankAuto rule yet, so this is always 0 elsewhere.
+function computeTeamProvisionalPoints(teamKey){
+  const meta = TEAM_META[teamKey];
+  const scoring = meta && LEAGUE_SCORING[meta.leagueKey];
+  if(!scoring || meta.leagueKey !== 'epl') return 0;
+  return scoring.rules.reduce((sum, r) => sum + (r.rankAuto && getEplRuleTeams(r).includes(teamKey) ? r.pts : 0), 0);
+}
+
 function trackerSectionHtml(teamKey){
   const meta = TEAM_META[teamKey];
   const scoring = meta && LEAGUE_SCORING[meta.leagueKey];
@@ -503,20 +534,37 @@ function trackerSectionHtml(teamKey){
   // Facts panel), not per-team — this is a read-only summary of where
   // things stand.
   if(meta.leagueKey === 'epl'){
+    const provisionalPts = computeTeamProvisionalPoints(teamKey);
     const itemsHtml = scoring.rules.map(r => {
       const achieved = getEplRuleTeams(r).includes(teamKey);
+      // Rank-based rules (rankAuto) reflect the table as it stands right
+      // now, not a locked-in result — "2nd in EPL" today could be 5th by
+      // the time the season actually ends. Give those a visibly
+      // different (amber, not green/red) state instead of the same
+      // checkmark used for a real fact like "Win FA Cup".
+      const isProvisional = achieved && !!r.rankAuto;
+      const stateClass = achieved ? (isProvisional ? 'provisional' : 'achieved') : '';
       return `
-        <div class="tracker-item readonly ${achieved ? 'achieved' : ''}">
+        <div class="tracker-item readonly ${stateClass}">
           <div class="tracker-check">${achieved ? CHECK_ICON_SVG : ''}</div>
-          <div class="tracker-label">${r.label}</div>
+          <div class="tracker-label">${r.label}${isProvisional ? '<span class="provisional-tag">Current</span>' : ''}</div>
           <div class="tracker-value ${r.pts >= 0 ? 'pos' : 'neg'}">${r.pts >= 0 ? '+' : ''}${r.pts} pt${Math.abs(r.pts) === 1 ? '' : 's'}</div>
         </div>
       `;
     }).join('');
 
+    // "Earned so far" is confirmed points only — locked-in facts, not
+    // whatever the table currently implies. Provisional points are
+    // shown separately alongside it, not folded into that headline
+    // number, since they can still move before the season ends.
+    const confirmedPts = total - provisionalPts;
+    const provisionalNoteHtml = provisionalPts !== 0
+      ? `<span class="provisional-note">${provisionalPts >= 0 ? '+' : ''}${provisionalPts} provisional</span>`
+      : '';
+
     return `
       <div class="modal-section-title">Track This Season</div>
-      <div class="tracker-total">Earned so far: <b>${total >= 0 ? '+' : ''}${total}</b> pt${Math.abs(total) === 1 ? '' : 's'}</div>
+      <div class="tracker-total">Earned so far: <b>${confirmedPts >= 0 ? '+' : ''}${confirmedPts}</b> pt${Math.abs(confirmedPts) === 1 ? '' : 's'}${provisionalNoteHtml}</div>
       <div class="tracker-list">${itemsHtml}</div>
       <button class="tracker-manage-link" onclick="openEplResultsModal();">Marked from Results &rarr;</button>
     `;
@@ -635,7 +683,11 @@ function fetchEplStandingsTable(){
 
   eplStandingsCache.loading = true;
   eplStandingsPromise = (async () => {
-    const data = await fetchJSON(`${API_BASE}lookuptable.php?l=${EPL_LEAGUE_ID}&s=${EPL_API_SEASON}`);
+    // Routed through the worker with the premium key (V1's lookuptable.php
+    // has no V2 equivalent, but premium raises V1's own row cap too —
+    // confirmed returning all 20 EPL rows instead of the free tier's 5,
+    // see the migration plan's Phase 1 findings).
+    const data = await fetchJSON(`${DASHBOARD_WORKER_BASE}/sportsdb/table/${EPL_LEAGUE_ID}/${EPL_API_SEASON}`);
     eplStandingsCache.loading = false;
     if(data && data.table && data.table.length){
       eplStandingsCache.table = data.table;
@@ -660,9 +712,12 @@ function fetchEplStandingsTable(){
 
 function renderStandingsRow(leagueKey, row){
   const teamKey = findDraftedTeamByName(leagueKey, row.strTeam);
-  const meta = teamKey ? TEAM_META[teamKey] : null;
-  const badgeStyle = meta ? meta.badgeStyle : 'background: rgba(255,255,255,0.08); color: var(--text-sub); border-color: var(--hairline-strong);';
-  const badgeText = meta ? meta.badgeText : abbrFromName(row.strTeam);
+  const meta = teamKey ? TEAM_META[teamKey] : {
+    name: row.strTeam,
+    badgeStyle: 'background: rgba(255,255,255,0.08); color: var(--text-sub); border-color: var(--hairline-strong);',
+    badgeText: abbrFromName(row.strTeam),
+    badgeUrl: null
+  };
   const draftedByHtml = teamKey
     ? `<div class="drafted-by-chip">${DRAFT_TEAMS.find(d => d.id === meta.draftTeamId).name}</div>`
     : '';
@@ -670,7 +725,7 @@ function renderStandingsRow(leagueKey, row){
   return `
     <div class="standings-row ${teamKey ? 'clickable' : ''}" ${teamKey ? `onclick="openTeamModal('${teamKey}')"` : ''}>
       <div class="standings-rank">${row.intRank}</div>
-      <div class="badge" style="${badgeStyle}">${badgeText}</div>
+      ${teamBadgeHtml(meta)}
       <div class="team-main">
         <div class="team-name">${row.strTeam}</div>
         <div class="team-sub">${row.intWin}-${row.intDraw}-${row.intLoss} &middot; ${row.intPoints} pts</div>
@@ -728,11 +783,20 @@ function renderEplByDrafterRow(row, rank){
   if(row.found === 0) note = 'No data yet';
   else if(row.found < row.total) note = `${row.found} of ${row.total} teams reporting`;
 
+  // The league bonus (LEAGUE_SCORING.epl.bonus — "highest combined
+  // record") goes to whoever's on top when the season actually ends.
+  // Flagging it for whoever's CURRENTLY #1 here is the same
+  // not-locked-in idea as the per-team rank rules, just applied to
+  // this cross-drafter ranking instead of a single team's table spot.
+  const bonus = LEAGUE_SCORING.epl.bonus;
+  const isLeader = row.found > 0 && rank === 1 && bonus;
+  const leaderTagHtml = isLeader ? `<span class="provisional-tag">+${bonus.pts} provisional</span>` : '';
+
   return `
     <div class="standings-row">
       <div class="standings-rank">${row.found > 0 ? rank : '—'}</div>
       <div class="team-main">
-        <div class="team-name">${row.name}</div>
+        <div class="team-name">${row.name}${leaderTagHtml}</div>
         <div class="team-sub">${teamsLabel}${note ? ' &middot; ' + note : ''}</div>
       </div>
       <div class="drafted-by-chip">${row.found > 0 ? `${row.win}-${row.draw}-${row.loss} &middot; ${row.points} pts` : '&mdash;'}</div>
@@ -879,15 +943,22 @@ function switchView(view){
 
 function computeDraftTeamBreakdown(draftTeamId){
   const perLeague = {};
+  const perLeagueProvisional = {};
   let total = 0;
+  let provisionalTotal = 0;
   LEAGUES.forEach(league => {
-    const leaguePts = league.teams.reduce((sum, teamKey) => {
-      return TEAM_META[teamKey].draftTeamId === draftTeamId ? sum + computeTeamPoints(teamKey) : sum;
-    }, 0);
+    let leaguePts = 0, leagueProvisionalPts = 0;
+    league.teams.forEach(teamKey => {
+      if(TEAM_META[teamKey].draftTeamId !== draftTeamId) return;
+      leaguePts += computeTeamPoints(teamKey);
+      leagueProvisionalPts += computeTeamProvisionalPoints(teamKey);
+    });
     perLeague[league.key] = leaguePts;
+    perLeagueProvisional[league.key] = leagueProvisionalPts;
     total += leaguePts;
+    provisionalTotal += leagueProvisionalPts;
   });
-  return { perLeague, total };
+  return { perLeague, perLeagueProvisional, total, provisionalTotal };
 }
 
 function renderOverallStandings(){
@@ -900,9 +971,20 @@ function renderOverallStandings(){
   const rowsHtml = rows.map((r, i) => {
     const chipsHtml = LEAGUES.map(l => {
       const pts = r.perLeague[l.key];
+      const provisionalPts = r.perLeagueProvisional[l.key];
       const cls = pts > 0 ? 'pos' : (pts < 0 ? 'neg' : 'zero');
-      return `<span class="ob-chip ${cls}">${l.label} ${pts > 0 ? '+' : ''}${pts}</span>`;
+      // A gold dot flags a league total that includes points from
+      // current (not yet final) standings — e.g. "2nd in EPL" — rather
+      // than only locked-in facts. Title gives the exact amount on hover.
+      const dotHtml = provisionalPts !== 0
+        ? `<span class="ob-chip-dot" title="Includes ${provisionalPts >= 0 ? '+' : ''}${provisionalPts} pt${Math.abs(provisionalPts) === 1 ? '' : 's'} from current standings — not final until the season ends"></span>`
+        : '';
+      return `<span class="ob-chip ${cls}">${dotHtml}${l.label} ${pts > 0 ? '+' : ''}${pts}</span>`;
     }).join('');
+
+    const totalDotHtml = r.provisionalTotal !== 0
+      ? `<span class="overall-total-dot" title="Includes ${r.provisionalTotal >= 0 ? '+' : ''}${r.provisionalTotal} pt${Math.abs(r.provisionalTotal) === 1 ? '' : 's'} from current standings — not final until the season ends"></span>`
+      : '';
 
     return `
       <div class="overall-row ${r.id === currentDraftTeamId ? 'current' : ''}" onclick="setDraftTeam('${r.id}'); switchView('board');">
@@ -911,7 +993,7 @@ function renderOverallStandings(){
           <div class="overall-name">${r.name}</div>
           <div class="overall-breakdown">${chipsHtml}</div>
         </div>
-        <div class="overall-total ${r.total === 0 ? 'zero' : (r.total < 0 ? 'neg' : '')}">${r.total > 0 ? '+' : ''}${r.total} pt${Math.abs(r.total) === 1 ? '' : 's'}</div>
+        <div class="overall-total ${r.total === 0 ? 'zero' : (r.total < 0 ? 'neg' : '')}">${totalDotHtml}${r.total > 0 ? '+' : ''}${r.total} pt${Math.abs(r.total) === 1 ? '' : 's'}</div>
       </div>
     `;
   }).join('');
@@ -990,6 +1072,35 @@ function formatUpdatedAt(date){
   return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/Chicago', timeZoneName: 'short' });
 }
 
+// ---- TheSportsDB V2 migration (see the migration plan) ----
+// Phase 3, batched by league: only leagues listed here read from V2
+// (via the worker proxy, premium key held server-side) — everyone
+// else stays on V1 until their league's batch lands, verified against
+// real data first. EPL is fully migrated (Phase 2 piloted it on
+// Liverpool/Newcastle, side-by-side-diffed against V1, then the rest
+// of the league followed once that checked out). Remove this list
+// entirely (and the V1 branch below it) once every league has
+// migrated — Phase 4.
+const V2_MIGRATED_LEAGUES = ['epl'];
+
+// V2's team-lookup response is shaped { lookup: [...] } and its
+// schedule responses are { schedule: [...] } — normalized here into
+// the { teams: [...] } / { results: [...], events: [...] } shape V1
+// used, so renderStats/renderForm/renderNext don't need to change at
+// all for the pilot. Field *names* inside each entry (strSport,
+// strHomeTeam, intHomeScore, strTimestamp, etc.) matched V1's
+// one-for-one when checked against real data — see Phase 1 findings.
+async function fetchSportsDbV2Team(id){
+  const v2 = await fetchJSON(`${DASHBOARD_WORKER_BASE}/sportsdb/team/${id}`);
+  return v2 && v2.lookup ? { teams: v2.lookup } : null;
+}
+
+async function fetchSportsDbV2Schedule(kind, id){
+  const v2 = await fetchJSON(`${DASHBOARD_WORKER_BASE}/sportsdb/${kind}/${id}`);
+  const list = (v2 && v2.schedule) || [];
+  return { results: list, events: list };
+}
+
 async function fetchTeamBundle(teamKey){
   const meta = TEAM_META[teamKey];
   if(!meta || (!meta.sportsdbId && !meta.rundownTeamId)) return null;
@@ -999,15 +1110,16 @@ async function fetchTeamBundle(teamKey){
   // state for leagues in RUNDOWN_SPORT_ID (see fetchRundownEventForTeam).
   if(meta.sportsdbId){
     const id = meta.sportsdbId;
+    const useV2 = V2_MIGRATED_LEAGUES.includes(meta.leagueKey);
     // Standings come from the one shared eplStandingsCache (see
     // fetchEplStandingsTable) rather than each team fetching and
     // storing its own copy of the same league table — renderStats
     // reads eplStandingsCache.table directly, so nothing from that
     // fetch needs to end up in this team's own bundle.
     const [info, last, next, , rundownEvent] = await Promise.all([
-      fetchJSON(`${API_BASE}lookupteam.php?id=${id}`),
-      fetchJSON(`${API_BASE}eventslast.php?id=${id}`),
-      fetchJSON(`${API_BASE}eventsnext.php?id=${id}`),
+      useV2 ? fetchSportsDbV2Team(id) : fetchJSON(`${API_BASE}lookupteam.php?id=${id}`),
+      useV2 ? fetchSportsDbV2Schedule('schedule-previous', id) : fetchJSON(`${API_BASE}eventslast.php?id=${id}`),
+      useV2 ? fetchSportsDbV2Schedule('schedule-next', id) : fetchJSON(`${API_BASE}eventsnext.php?id=${id}`),
       meta.leagueId ? fetchEplStandingsTable() : Promise.resolve(null),
       fetchRundownEventForTeam(meta)
     ]);
@@ -1289,7 +1401,7 @@ function openTeamModal(teamKey){
   modalContent.innerHTML = `
     <div class="modal-accent" style="background:${meta.accent};"></div>
     <div class="modal-head">
-      <div class="badge" style="${meta.badgeStyle}">${meta.badgeText}</div>
+      ${teamBadgeHtml(meta)}
       <div>
         <h2>${meta.name}</h2>
         <div class="modal-sub">${meta.sub}${hasLive ? ' <span class="live-badge">LIVE</span>' : ''}</div>
