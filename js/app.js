@@ -813,16 +813,29 @@ function eplStandingsToggleHtml(){
   `;
 }
 
+// Spelled out only in the Standings header — the filter chips, Board
+// tab, and modal titles all keep the short LEAGUES[].label as-is.
+const STANDINGS_HEADER_LABELS = {
+  epl: 'English Premier League'
+};
+
 function leagueBlockHtml(league, bodyHtml){
   const resultsChipHtml = league.key === 'epl'
     ? `<div class="scoring-chip" onclick="openEplResultsModal()">Results</div>`
     : '';
+  const headerLabel = STANDINGS_HEADER_LABELS[league.key] || league.label;
 
   return `
     <div class="league">
-      <div class="league-tab">
-        <div class="league-tab-left">${league.label} <div class="scoring-chip" onclick="openLeagueModal('${league.key}')">Scoring</div>${resultsChipHtml}</div>
-        <span class="n">${league.season}</span>
+      <div class="league-tab standings-league-tab">
+        <div class="league-tab-top">
+          <div class="league-tab-left">${headerLabel}</div>
+          <span class="n">${league.season}</span>
+        </div>
+        <div class="league-tab-chips">
+          <div class="scoring-chip" onclick="openLeagueModal('${league.key}')">Scoring</div>
+          ${resultsChipHtml}
+        </div>
       </div>
       ${bodyHtml}
     </div>
@@ -901,11 +914,28 @@ function openEplResultsModal(){
   lockBodyScroll();
 }
 
+// Which league the Standings view is isolated to — like eplStandingsMode
+// below, this is a within-session view convenience (not persisted), so
+// it resets to "All" each time you open the app.
+let standingsFilterKey = 'all';
+
+function setStandingsFilter(key){
+  standingsFilterKey = key;
+  renderStandings();
+}
+
 function renderStandings(){
   const container = document.getElementById('standings-content');
   if(!container) return;
 
-  const blocksHtml = LEAGUES.map(league => {
+  const chipsHtml = ['all'].concat(LEAGUES.map(l => l.key)).map(key => {
+    const label = key === 'all' ? 'All' : LEAGUES.find(l => l.key === key).label;
+    return `<div class="filter-chip ${key === standingsFilterKey ? 'active' : ''}" onclick="setStandingsFilter('${key}')">${label}</div>`;
+  }).join('');
+
+  const shownLeagues = standingsFilterKey === 'all' ? LEAGUES : LEAGUES.filter(l => l.key === standingsFilterKey);
+
+  const blocksHtml = shownLeagues.map(league => {
     if(league.key !== 'epl'){
       return leagueBlockHtml(league, `<div class="no-live-note">No data available.</div>`);
     }
@@ -927,7 +957,10 @@ function renderStandings(){
     return leagueBlockHtml(league, bodyHtml);
   }).join('');
 
-  container.innerHTML = `<div class="standings-grid">${blocksHtml}</div>`;
+  container.innerHTML = `
+    <div class="standings-filter-row"><div class="filter-chips">${chipsHtml}</div></div>
+    <div class="standings-grid">${blocksHtml}</div>
+  `;
 }
 
 // ---- Bottom tab navigation ----
