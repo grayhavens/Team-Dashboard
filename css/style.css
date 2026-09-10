@@ -137,6 +137,15 @@ body{
   color: var(--accent);
 }
 
+/* Persistent selection (Standings' league filter) rather than the
+   touch feedback above — filled solid so it reads as "on" even after
+   you lift your finger, not just a footprint from the last :active tap. */
+.filter-chip.active{
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #0A0B0D;
+}
+
 .leagues{
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -924,6 +933,16 @@ body{
 }
 
 /* ---- Standings view (real per-league tables) ---- */
+/* Pinned so the league filter stays reachable while scrolling a long
+   table — offset by the safe-area inset (not a flat 0) so it settles
+   below the notch/status bar instead of sliding under it. */
+.standings-filter-row{
+  position: sticky;
+  top: env(safe-area-inset-top);
+  background: var(--bg);
+  z-index: 5;
+}
+
 .standings-toggle{
   display: flex;
   gap: 6px;
