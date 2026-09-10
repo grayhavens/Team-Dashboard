@@ -5,3 +5,10 @@ compatibility_date = "2026-09-01"
 # The actual key is NOT set here — it's stored as a Cloudflare secret
 # so it never touches source control:
 #   npx wrangler secret put THERUNDOWN_API_KEY
+
+# Shared storage for the Results modal's league facts (who won the FA
+# Cup, etc.) so a mark made by one drafter is visible to everyone —
+# created with `npx wrangler kv namespace create LEAGUE_FACTS`.
+[[kv_namespaces]]
+binding = "LEAGUE_FACTS"
+id = "abadd3da86124f0fbb586566034a9d52"
