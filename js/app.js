@@ -813,16 +813,29 @@ function eplStandingsToggleHtml(){
   `;
 }
 
+// Spelled out only in the Standings header — the filter chips, Board
+// tab, and modal titles all keep the short LEAGUES[].label as-is.
+const STANDINGS_HEADER_LABELS = {
+  epl: 'English Premier League'
+};
+
 function leagueBlockHtml(league, bodyHtml){
   const resultsChipHtml = league.key === 'epl'
     ? `<div class="scoring-chip" onclick="openEplResultsModal()">Results</div>`
     : '';
+  const headerLabel = STANDINGS_HEADER_LABELS[league.key] || league.label;
 
   return `
     <div class="league">
-      <div class="league-tab">
-        <div class="league-tab-left">${league.label} <div class="scoring-chip" onclick="openLeagueModal('${league.key}')">Scoring</div>${resultsChipHtml}</div>
-        <span class="n">${league.season}</span>
+      <div class="league-tab standings-league-tab">
+        <div class="league-tab-top">
+          <div class="league-tab-left">${headerLabel}</div>
+          <span class="n">${league.season}</span>
+        </div>
+        <div class="league-tab-chips">
+          <div class="scoring-chip" onclick="openLeagueModal('${league.key}')">Scoring</div>
+          ${resultsChipHtml}
+        </div>
       </div>
       ${bodyHtml}
     </div>

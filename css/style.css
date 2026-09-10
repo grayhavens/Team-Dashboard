@@ -178,6 +178,31 @@ body{
   gap: 10px;
 }
 
+/* Standings-only header layout: title + season share a top line (the
+   title can run long, e.g. "English Premier League", so the season
+   is top-aligned rather than centered against however many lines that
+   wraps to), and the Scoring/Results chips get their own line below
+   instead of squeezing onto the same row — see leagueBlockHtml in
+   js/app.js. */
+.league-tab.standings-league-tab{
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.league-tab-top{
+  display:flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.league-tab-chips{
+  display:flex;
+  align-items:center;
+  gap: 8px;
+}
+
 .league-tab .n{
   font-family: 'Manrope', sans-serif;
   font-size: 11px;
@@ -249,7 +274,6 @@ body{
 }
 
 .scoring-chip{
-  margin-left: auto;
   flex: 0 0 auto;
   font-family: 'Manrope', sans-serif;
   font-size: 10px;
