@@ -855,6 +855,21 @@ body{
 .view{ display: none; }
 .view.active{ display: block; }
 
+/* Tiny build marker in the corner so you can confirm a device is
+   running the latest deploy rather than a stale cached copy. */
+.build-tag{
+  position: fixed;
+  left: 10px;
+  bottom: calc(var(--nav-h) + env(safe-area-inset-bottom) + 6px);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  color: var(--text-mute);
+  opacity: 0.45;
+  pointer-events: none;
+  z-index: 150;
+}
+
 .tab-bar{
   position: fixed;
   left: 0;
