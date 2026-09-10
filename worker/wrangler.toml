@@ -1,0 +1,7 @@
+name = "team-dashboard-rundown-proxy"
+main = "rundown-proxy.js"
+compatibility_date = "2026-09-01"
+
+# The actual key is NOT set here — it's stored as a Cloudflare secret
+# so it never touches source control:
+#   npx wrangler secret put THERUNDOWN_API_KEY
