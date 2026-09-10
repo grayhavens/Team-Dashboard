@@ -4,7 +4,7 @@
     {
       "name": "team-dashboard",
       "runtimeExecutable": "python3",
-      "runtimeArgs": ["-m", "http.server", "8934"],
+      "runtimeArgs": ["-c", "import sys; sys.path = [p for p in sys.path if p]; import functools, http.server; http.server.ThreadingHTTPServer(('0.0.0.0', 8934), functools.partial(http.server.SimpleHTTPRequestHandler, directory='/Users/joshgonshor/Documents/Team-Dashboard')).serve_forever()"],
       "port": 8934
     }
   ]

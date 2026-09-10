@@ -103,6 +103,26 @@ function scrollToLeague(key){
   if(el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
+// ---- Modal scroll lock ----
+// Pins the page in place behind the modal (rather than just hiding
+// overflow) so iOS Safari can't rubber-band-scroll the background
+// while a modal is open. Restores the exact scroll position on close.
+let lockedScrollY = 0;
+
+function lockBodyScroll(){
+  lockedScrollY = window.scrollY;
+  document.body.style.position = 'fixed';
+  document.body.style.top = `-${lockedScrollY}px`;
+  document.body.style.width = '100%';
+}
+
+function unlockBodyScroll(){
+  document.body.style.position = '';
+  document.body.style.top = '';
+  document.body.style.width = '';
+  window.scrollTo(0, lockedScrollY);
+}
+
 // ---- League scoring reference modal ----
 
 function openLeagueModal(leagueKey){
@@ -116,6 +136,19 @@ function openLeagueModal(leagueKey){
     </div>
   `).join('');
 
+  // The league bonus is awarded once per drafter (not per team), so it's
+  // kept separate from `rules` — it never appears as a checkable item on
+  // an individual team's tracker.
+  const bonusHtml = data.bonus ? `
+    <div class="modal-section-title" style="margin-top: 18px;">League Bonus</div>
+    <div class="scoring-list">
+      <div class="scoring-item">
+        <div class="scoring-label">${data.bonus.label}</div>
+        <div class="scoring-value pos">+${data.bonus.pts} pts</div>
+      </div>
+    </div>
+  ` : '';
+
   document.getElementById('modal-content').innerHTML = `
     <div class="modal-accent" style="background:${data.accent};"></div>
     <div class="modal-head">
@@ -127,10 +160,12 @@ function openLeagueModal(leagueKey){
     </div>
     <div class="modal-body" style="padding-top: 18px;">
       <div class="scoring-list">${rulesHtml}</div>
+      ${bonusHtml}
     </div>
   `;
 
   document.getElementById('modal-overlay').classList.add('open');
+  lockBodyScroll();
 }
 
 // ---- Season tracker (manual achievement checklist -> standings) ----
@@ -287,6 +322,75 @@ function renderStandingsRow(leagueKey, row){
   `;
 }
 
+// Toggle between the real club-by-club table and each drafter's
+// combined record — the latter is what determines the league's
+// 5-point "best combined record" bonus (see LEAGUE_SCORING[key].bonus).
+let eplStandingsMode = 'table';
+
+function setEplStandingsMode(mode){
+  eplStandingsMode = mode;
+  renderStandings();
+}
+
+function computeEplDrafterCombined(){
+  const league = LEAGUES.find(l => l.key === 'epl');
+  const byDrafter = {};
+  DRAFT_TEAMS.forEach(d => {
+    byDrafter[d.id] = { id: d.id, name: d.name, win: 0, draw: 0, loss: 0, points: 0, found: 0, total: 0, teamNames: [] };
+  });
+
+  league.teams.forEach(teamKey => {
+    const meta = TEAM_META[teamKey];
+    byDrafter[meta.draftTeamId].total++;
+    byDrafter[meta.draftTeamId].teamNames.push(meta.name);
+  });
+
+  (eplStandingsCache.table || []).forEach(row => {
+    const teamKey = findDraftedTeamByName('epl', row.strTeam);
+    if(!teamKey) return;
+    const bucket = byDrafter[TEAM_META[teamKey].draftTeamId];
+    bucket.win += parseInt(row.intWin, 10) || 0;
+    bucket.draw += parseInt(row.intDraw, 10) || 0;
+    bucket.loss += parseInt(row.intLoss, 10) || 0;
+    bucket.points += parseInt(row.intPoints, 10) || 0;
+    bucket.found++;
+  });
+
+  return Object.values(byDrafter).sort((a, b) => {
+    if(a.found === 0 && b.found === 0) return 0;
+    if(a.found === 0) return 1;
+    if(b.found === 0) return -1;
+    return b.points - a.points;
+  });
+}
+
+function renderEplByDrafterRow(row, rank){
+  const teamsLabel = row.teamNames.join(' & ');
+  let note = '';
+  if(row.found === 0) note = 'No data yet';
+  else if(row.found < row.total) note = `${row.found} of ${row.total} teams reporting`;
+
+  return `
+    <div class="standings-row">
+      <div class="standings-rank">${row.found > 0 ? rank : '—'}</div>
+      <div class="team-main">
+        <div class="team-name">${row.name}</div>
+        <div class="team-sub">${teamsLabel}${note ? ' &middot; ' + note : ''}</div>
+      </div>
+      <div class="drafted-by-chip">${row.found > 0 ? `${row.win}-${row.draw}-${row.loss} &middot; ${row.points} pts` : '&mdash;'}</div>
+    </div>
+  `;
+}
+
+function eplStandingsToggleHtml(){
+  return `
+    <div class="standings-toggle">
+      <button class="toggle-btn ${eplStandingsMode === 'table' ? 'active' : ''}" onclick="setEplStandingsMode('table')">League</button>
+      <button class="toggle-btn ${eplStandingsMode === 'byDrafter' ? 'active' : ''}" onclick="setEplStandingsMode('byDrafter')">Person</button>
+    </div>
+  `;
+}
+
 function leagueBlockHtml(league, bodyHtml){
   return `
     <div class="league">
@@ -309,7 +413,10 @@ function renderStandings(){
     }
 
     if(eplStandingsCache.table){
-      return leagueBlockHtml(league, eplStandingsCache.table.map(row => renderStandingsRow('epl', row)).join(''));
+      const rowsHtml = eplStandingsMode === 'byDrafter'
+        ? computeEplDrafterCombined().map((row, i) => renderEplByDrafterRow(row, i + 1)).join('')
+        : eplStandingsCache.table.map(row => renderStandingsRow('epl', row)).join('');
+      return leagueBlockHtml(league, eplStandingsToggleHtml() + rowsHtml);
     }
 
     if(eplStandingsCache.error){
@@ -581,6 +688,7 @@ function openTeamModal(teamKey){
   if(!meta) return;
 
   document.getElementById('modal-overlay').classList.add('open');
+  lockBodyScroll();
 
   const modalContent = document.getElementById('modal-content');
   modalContent.dataset.activeTeam = teamKey;
@@ -626,6 +734,7 @@ function openTeamModal(teamKey){
 function closeTeamModal(){
   document.getElementById('modal-overlay').classList.remove('open');
   document.getElementById('modal-content').dataset.activeTeam = '';
+  unlockBodyScroll();
 }
 
 document.addEventListener('keydown', (e) => {
