@@ -92,6 +92,25 @@ function json(data, status, headers){
   });
 }
 
+/* ---- Adding a new league or upstream endpoint: keep this scalable ----
+   1. If the credential behind it is private/paid (not a public test
+      key like TheSportsDB's old "123"), it MUST be proxied through
+      this Worker, never shipped in client JS — add a new proxyTo/
+      handle function pair mirroring the ones below.
+   2. Every new upstream fetch MUST go through cachedUpstreamFetch, not
+      a bare fetch() — add its TTL to CACHE_TTL_SECONDS below rather
+      than hardcoding a number inline. Pick that TTL to match whatever
+      TTL you're also about to use client-side (see the matching
+      checklist next to RUNDOWN_CACHE_TTL_MS in js/app.js) — one
+      freshness decision, not two that can quietly drift apart.
+   3. Add the new league's key to KNOWN_LEAGUES only if it needs the
+      League Facts feature (shared cross-viewer marks) — most new
+      leagues won't need this on day one.
+   4. If an endpoint's real response shape is unverified (no confirmed
+      docs, or docs that don't match reality — see the V1/V2 standings
+      note above), curl it directly with a real key and confirm the
+      shape before any client code gets built against it. */
+
 // How long each upstream shape is trusted in the edge cache before a
 // fresh fetch is made — matched to the client-side TTLs in js/app.js
 // (RUNDOWN_CACHE_TTL_MS, TEAM_INFO_TTL_MS, EPL_STANDINGS_TTL_MS) so this

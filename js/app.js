@@ -59,6 +59,42 @@ const RUNDOWN_SPORT_ID = {
 // STATUS_POSTPONED / STATUS_CANCELED (already over / not happening).
 const RUNDOWN_LIVE_STATUSES = new Set(['STATUS_IN_PROGRESS', 'STATUS_HALFTIME', 'STATUS_END_PERIOD']);
 
+/* ---- Adding a new league or per-team data source: keep this scalable ----
+   The patterns below (rundownDayCache right after this comment,
+   eplStandingsCache, LIVE_TEAM_KEYS/backgroundRefreshTick near the
+   bottom of this file) are deliberate, not incidental — follow them
+   for anything new rather than reinventing a fetch path:
+
+   1. Data shared by every team in a league (a day's slate, a standings
+      table) belongs in ONE cache keyed by leagueKey (+date, if it's
+      date-scoped) — mirror rundownDayCache / eplStandingsCache. Never
+      let each team fetch and store its own copy of the same
+      league-wide payload; that's what turns "add 27 more CFB teams"
+      into "27 more calls" instead of zero.
+   2. Data that's genuinely per-team (last result, next fixture) rides
+      the existing staggered refresh loop (LIVE_TEAM_KEYS /
+      backgroundRefreshTick) — don't add a second polling loop. If it
+      adds calls to the per-tick SportsDB budget, bump
+      SPORTSDB_CALLS_PER_TEAM_TICK so REFRESH_CYCLE_MS keeps stretching
+      out correctly as the roster grows.
+   3. Anything that should survive a reload goes in its own per-entity
+      localStorage key (prefix + id), not one growing blob — mirror
+      LIVE_DATA_CACHE_PREFIX / TEAM_INFO_CACHE_PREFIX below.
+   4. Pick each cache's TTL to match how fast that data actually
+      changes (static info -> hours, live scores -> ~1min, standings ->
+      ~15min) — and use that SAME number for CACHE_TTL_SECONDS on
+      whichever Worker endpoint backs it (see worker/rundown-proxy.js),
+      so the two layers agree on freshness instead of each guessing
+      separately.
+   5. If a league's data shape or endpoint is unverified, pilot it on
+      2-3 teams and diff against a known-good source before rolling it
+      out league-wide — same approach EPL's V1->V2 migration used (see
+      V2_MIGRATED_LEAGUES below).
+   6. If the credential behind it is private/paid (not a public test
+      key), it MUST be proxied through the Worker, never shipped in
+      client JS — see the Worker-side checklist in
+      worker/rundown-proxy.js next to CACHE_TTL_SECONDS. */
+
 // A day's full slate for a league rarely changes within a few
 // minutes, and every team in that league shares one slate — so this
 // caches by leagueKey+date for a short TTL rather than re-fetching
