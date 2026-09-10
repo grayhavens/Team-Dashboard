@@ -35,6 +35,18 @@
       finish. Unverified until tested with a real key — see the
       migration plan's Phase 1.
 
+   EDGE CACHING — every proxied GET is cached in Workers' shared edge
+   cache (caches.default), keyed on the upstream URL alone, with a TTL
+   matched to how fast that data actually changes (see CACHE_TTL_SECONDS
+   below). This exists because the client-side TTLs in js/app.js only
+   protect a single browser: with several drafters loading the dashboard
+   at once (e.g. everyone checking scores during a Saturday college
+   football slate), each browser was independently re-hitting TheRundown
+   on its own schedule, multiplying real upstream calls by however many
+   tabs were open. That's how 36 "requests" blew a 20,000/day data-point
+   budget in one sitting — this collapses concurrent/near-concurrent
+   requests for the same data into one upstream fetch, shared by everyone.
+
    Deploy (from this worker/ directory):
      npx wrangler login
      npx wrangler secret put THERUNDOWN_API_KEY
@@ -80,10 +92,50 @@ function json(data, status, headers){
   });
 }
 
-async function proxyToRundown(rundownPath, env, headers){
-  const upstream = await fetch(`${RUNDOWN_BASE}${rundownPath}`, {
+// How long each upstream shape is trusted in the edge cache before a
+// fresh fetch is made — matched to the client-side TTLs in js/app.js
+// (RUNDOWN_CACHE_TTL_MS, TEAM_INFO_TTL_MS, EPL_STANDINGS_TTL_MS) so this
+// layer never serves staler data than a single browser would already
+// tolerate; it only stops N browsers from each re-fetching the same
+// thing independently.
+const CACHE_TTL_SECONDS = {
+  rundownEvents: 60,           // a day's slate barely changes minute to minute
+  rundownTeams: 60 * 60,       // one-off/occasional lookups, not polled on a schedule
+  sportsdbTeam: 24 * 60 * 60,  // sport/founded/stadium/colors — effectively static
+  sportsdbSchedule: 60,        // last-result / next-fixture, refreshed on the same cadence as rundownEvents
+  sportsdbTable: 15 * 60       // league standings
+};
+
+// Shared building block for every proxy below: check the edge cache
+// first (keyed on the upstream URL only — never the incoming request,
+// whose Origin header varies per caller and would otherwise fragment
+// the cache key for no reason), and on a miss fetch + cache the result
+// for ttlSeconds before returning it. ctx.waitUntil lets the cache
+// write finish after the response has already gone back to the client.
+async function cachedUpstreamFetch(upstreamUrl, ttlSeconds, fetchOptions, ctx){
+  const cache = caches.default;
+  const cacheKey = new Request(upstreamUrl, { method: 'GET' });
+
+  const cached = await cache.match(cacheKey);
+  if(cached) return cached;
+
+  const upstream = await fetch(upstreamUrl, fetchOptions);
+  if(upstream.ok){
+    const toReturn = new Response(upstream.body, upstream);
+    const toCache = toReturn.clone();
+    toCache.headers.set('Cache-Control', `public, max-age=${ttlSeconds}`);
+    ctx.waitUntil(cache.put(cacheKey, toCache));
+    return toReturn;
+  }
+  // Never cache an error response — a transient upstream failure
+  // shouldn't get pinned in the shared cache for everyone.
+  return upstream;
+}
+
+async function proxyToRundown(rundownPath, env, headers, ttlSeconds, ctx){
+  const upstream = await cachedUpstreamFetch(`${RUNDOWN_BASE}${rundownPath}`, ttlSeconds, {
     headers: { 'X-TheRundown-Key': env.THERUNDOWN_API_KEY }
-  });
+  }, ctx);
   const body = await upstream.text();
   return new Response(body, {
     status: upstream.status,
@@ -91,7 +143,7 @@ async function proxyToRundown(rundownPath, env, headers){
   });
 }
 
-async function handleRundownEvents(request, url, env, headers){
+async function handleRundownEvents(request, url, env, headers, ctx){
   if(request.method !== 'GET'){
     return new Response('Method not allowed', { status: 405, headers });
   }
@@ -111,11 +163,14 @@ async function handleRundownEvents(request, url, env, headers){
   // multi-sportsbook markets payload burns through that budget fast —
   // confirmed 2026-09-10 when 36 unfiltered requests exhausted the
   // 20,000/day cap. Effectiveness of this filter is unverified until
-  // the next UTC day's quota resets.
-  return proxyToRundown(`/sports/${sportId}/events/${date}?market_ids=1`, env, headers);
+  // the next UTC day's quota resets. The edge cache above (see
+  // CACHE_TTL_SECONDS) also now collapses every viewer's request for
+  // the same sportId+date into one upstream call instead of one per
+  // browser, which is the bigger lever on that same budget.
+  return proxyToRundown(`/sports/${sportId}/events/${date}?market_ids=1`, env, headers, CACHE_TTL_SECONDS.rundownEvents, ctx);
 }
 
-async function handleRundownTeams(request, url, env, headers){
+async function handleRundownTeams(request, url, env, headers, ctx){
   if(request.method !== 'GET'){
     return new Response('Method not allowed', { status: 405, headers });
   }
@@ -126,13 +181,13 @@ async function handleRundownTeams(request, url, env, headers){
   const match = url.pathname.match(/^\/teams\/(\d+)$/);
   if(!match) return new Response('Not found', { status: 404, headers });
   const [, sportId] = match;
-  return proxyToRundown(`/sports/${sportId}/teams`, env, headers);
+  return proxyToRundown(`/sports/${sportId}/teams`, env, headers, CACHE_TTL_SECONDS.rundownTeams, ctx);
 }
 
-async function proxyToSportsDbV2(sportsdbPath, env, headers){
-  const upstream = await fetch(`${SPORTSDB_V2_BASE}${sportsdbPath}`, {
+async function proxyToSportsDbV2(sportsdbPath, env, headers, ttlSeconds, ctx){
+  const upstream = await cachedUpstreamFetch(`${SPORTSDB_V2_BASE}${sportsdbPath}`, ttlSeconds, {
     headers: { 'X-API-KEY': env.SPORTSDB_API_KEY }
-  });
+  }, ctx);
   const body = await upstream.text();
   return new Response(body, {
     status: upstream.status,
@@ -140,11 +195,13 @@ async function proxyToSportsDbV2(sportsdbPath, env, headers){
   });
 }
 
-async function proxyToSportsDbV1(sportsdbPath, env, headers){
+async function proxyToSportsDbV1(sportsdbPath, env, headers, ttlSeconds, ctx){
   // V1 takes the key as a URL segment (same shape as the old public
   // "123" key), not a header — this just substitutes the real premium
-  // key in that same slot.
-  const upstream = await fetch(`${SPORTSDB_V1_BASE}/${env.SPORTSDB_API_KEY}${sportsdbPath}`);
+  // key in that same slot. The key ends up embedded in the edge cache's
+  // key too, but that cache is internal to this Worker (never exposed
+  // to a caller), so it's the same exposure as the outbound fetch itself.
+  const upstream = await cachedUpstreamFetch(`${SPORTSDB_V1_BASE}/${env.SPORTSDB_API_KEY}${sportsdbPath}`, ttlSeconds, {}, ctx);
   const body = await upstream.text();
   return new Response(body, {
     status: upstream.status,
@@ -152,7 +209,7 @@ async function proxyToSportsDbV1(sportsdbPath, env, headers){
   });
 }
 
-async function handleSportsDb(request, url, env, headers){
+async function handleSportsDb(request, url, env, headers, ctx){
   if(request.method !== 'GET'){
     return new Response('Method not allowed', { status: 405, headers });
   }
@@ -166,19 +223,19 @@ async function handleSportsDb(request, url, env, headers){
   let match;
 
   if((match = url.pathname.match(/^\/sportsdb\/team\/(\d+)$/))){
-    return proxyToSportsDbV2(`/lookup/team/${match[1]}`, env, headers);
+    return proxyToSportsDbV2(`/lookup/team/${match[1]}`, env, headers, CACHE_TTL_SECONDS.sportsdbTeam, ctx);
   }
   if((match = url.pathname.match(/^\/sportsdb\/schedule-next\/(\d+)$/))){
-    return proxyToSportsDbV2(`/schedule/next/team/${match[1]}`, env, headers);
+    return proxyToSportsDbV2(`/schedule/next/team/${match[1]}`, env, headers, CACHE_TTL_SECONDS.sportsdbSchedule, ctx);
   }
   if((match = url.pathname.match(/^\/sportsdb\/schedule-previous\/(\d+)$/))){
-    return proxyToSportsDbV2(`/schedule/previous/team/${match[1]}`, env, headers);
+    return proxyToSportsDbV2(`/schedule/previous/team/${match[1]}`, env, headers, CACHE_TTL_SECONDS.sportsdbSchedule, ctx);
   }
   // No confirmed V2 standings endpoint exists — this deliberately
   // stays on V1 with the premium key attached. See the header comment.
   if((match = url.pathname.match(/^\/sportsdb\/table\/(\d+)\/([\w-]+)$/))){
     const [, leagueId, season] = match;
-    return proxyToSportsDbV1(`/lookuptable.php?l=${leagueId}&s=${season}`, env, headers);
+    return proxyToSportsDbV1(`/lookuptable.php?l=${leagueId}&s=${season}`, env, headers, CACHE_TTL_SECONDS.sportsdbTable, ctx);
   }
 
   return new Response('Not found', { status: 404, headers });
@@ -217,7 +274,7 @@ async function handleLeagueFacts(request, env, leagueKey, headers){
 }
 
 export default {
-  async fetch(request, env){
+  async fetch(request, env, ctx){
     const url = new URL(request.url);
     const origin = request.headers.get('Origin') || '';
     const headers = corsHeaders(origin);
@@ -229,10 +286,10 @@ export default {
     const factsMatch = url.pathname.match(/^\/facts\/([a-z]+)$/);
     if(factsMatch) return handleLeagueFacts(request, env, factsMatch[1], headers);
 
-    if(url.pathname.startsWith('/sportsdb/')) return handleSportsDb(request, url, env, headers);
+    if(url.pathname.startsWith('/sportsdb/')) return handleSportsDb(request, url, env, headers, ctx);
 
-    if(url.pathname.startsWith('/teams/')) return handleRundownTeams(request, url, env, headers);
+    if(url.pathname.startsWith('/teams/')) return handleRundownTeams(request, url, env, headers, ctx);
 
-    return handleRundownEvents(request, url, env, headers);
+    return handleRundownEvents(request, url, env, headers, ctx);
   }
 };

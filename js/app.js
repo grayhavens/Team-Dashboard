@@ -1038,23 +1038,46 @@ function renderOverallStandings(){
 
 const liveDataCache = {}; // teamKey -> { info, last, next, table, fetchedAt }
 
-// Mirrors liveDataCache to localStorage so a team's last-known result
-// survives across browser sessions — otherwise every fresh page load
-// starts with every row-status pill blank until that team's turn comes
-// up in the staggered background refresh (see REFRESH_STEP_MS below),
-// which can take up to ~15 minutes. This is a per-browser convenience
-// cache, not shared state — every viewer still fetches their own fresh
-// data on the same schedule as before; this only changes what shows
-// while waiting for that.
-function saveLiveDataCache(){
-  try {
-    localStorage.setItem(LIVE_DATA_CACHE_KEY, JSON.stringify(liveDataCache));
-  } catch (e){}
+// Mirrors liveDataCache to localStorage — one key per team — so a
+// team's last-known result survives across browser sessions, rather
+// than every fresh page load starting blank until that team's turn
+// comes up in the staggered background refresh (see REFRESH_STEP_MS
+// below), which can take up to ~15 minutes. This is a per-browser
+// convenience cache, not shared state — every viewer still fetches
+// their own fresh data on the same schedule as before; this only
+// changes what shows while waiting for that.
+//
+// Written per-team rather than as one growing JSON blob under
+// LIVE_DATA_CACHE_KEY (the old shape) so a single team's refresh tick
+// only serializes and writes that team's own entry — with the roster
+// headed toward ~225 teams (see LIVE_TEAM_KEYS below), rewriting one
+// ever-larger blob on every ~14s tick would mean a bigger synchronous
+// write each time, almost all of it for teams that didn't even change.
+const LIVE_DATA_CACHE_PREFIX = 'teamDashboardLiveData:';
+
+function saveTeamBundleToStorage(teamKey, bundle){
+  try { localStorage.setItem(LIVE_DATA_CACHE_PREFIX + teamKey, JSON.stringify(bundle)); } catch (e){}
 }
 
 function setTeamBundle(teamKey, bundle){
   liveDataCache[teamKey] = bundle;
-  saveLiveDataCache();
+  saveTeamBundleToStorage(teamKey, bundle);
+}
+
+// One-time move off the old single-blob key: reads whatever's there,
+// fans it out into the new per-team keys, then removes it — so this
+// only ever runs once, the same "don't lose what's already saved"
+// approach as migrateEplAchievementsToFacts above.
+function migrateLegacyLiveDataCache(){
+  try {
+    const raw = localStorage.getItem(LIVE_DATA_CACHE_KEY);
+    if(!raw) return;
+    const parsed = JSON.parse(raw);
+    for(const teamKey of Object.keys(parsed)){
+      localStorage.setItem(LIVE_DATA_CACHE_PREFIX + teamKey, JSON.stringify(parsed[teamKey]));
+    }
+    localStorage.removeItem(LIVE_DATA_CACHE_KEY);
+  } catch (e){}
 }
 
 // Called once at boot, before the first paint, so cached pills show
@@ -1062,12 +1085,15 @@ function setTeamBundle(teamKey, bundle){
 // JSON.stringify as an ISO string, so it's parsed back into a Date
 // here — everything else in a bundle is plain JSON already.
 function loadLiveDataCache(){
+  migrateLegacyLiveDataCache();
   try {
-    const raw = localStorage.getItem(LIVE_DATA_CACHE_KEY);
-    if(!raw) return;
-    const parsed = JSON.parse(raw);
-    for(const teamKey of Object.keys(parsed)){
-      const bundle = parsed[teamKey];
+    for(let i = 0; i < localStorage.length; i++){
+      const key = localStorage.key(i);
+      if(!key || !key.startsWith(LIVE_DATA_CACHE_PREFIX)) continue;
+      const teamKey = key.slice(LIVE_DATA_CACHE_PREFIX.length);
+      const raw = localStorage.getItem(key);
+      if(!raw) continue;
+      const bundle = JSON.parse(raw);
       if(bundle && bundle.fetchedAt) bundle.fetchedAt = new Date(bundle.fetchedAt);
       liveDataCache[teamKey] = bundle;
     }
@@ -1143,20 +1169,40 @@ async function fetchSportsDbV2Schedule(kind, id){
 // doesn't even need to re-fetch it) cuts a third of the per-team call
 // volume with no real freshness cost. Same TTL-cache shape as
 // eplStandingsCache/rundownDayCache elsewhere in this file.
-const TEAM_INFO_CACHE_KEY = 'teamDashboardTeamInfoCache';
+// Legacy single-blob key, migrated away from below (see
+// migrateLegacyLiveDataCache's twin just above for why: one growing
+// JSON blob rewritten on every fetch doesn't scale as the roster grows).
+const TEAM_INFO_CACHE_LEGACY_KEY = 'teamDashboardTeamInfoCache';
+const TEAM_INFO_CACHE_PREFIX = 'teamDashboardTeamInfo:';
 const TEAM_INFO_TTL_MS = 24 * 60 * 60 * 1000;
 const teamInfoCache = {}; // teamKey -> { info, fetchedAt }
 
-function saveTeamInfoCache(){
-  try { localStorage.setItem(TEAM_INFO_CACHE_KEY, JSON.stringify(teamInfoCache)); } catch (e){}
+function saveTeamInfoToStorage(teamKey, entry){
+  try { localStorage.setItem(TEAM_INFO_CACHE_PREFIX + teamKey, JSON.stringify(entry)); } catch (e){}
+}
+
+function migrateLegacyTeamInfoCache(){
+  try {
+    const raw = localStorage.getItem(TEAM_INFO_CACHE_LEGACY_KEY);
+    if(!raw) return;
+    const parsed = JSON.parse(raw);
+    for(const teamKey of Object.keys(parsed)){
+      localStorage.setItem(TEAM_INFO_CACHE_PREFIX + teamKey, JSON.stringify(parsed[teamKey]));
+    }
+    localStorage.removeItem(TEAM_INFO_CACHE_LEGACY_KEY);
+  } catch (e){}
 }
 
 function loadTeamInfoCache(){
+  migrateLegacyTeamInfoCache();
   try {
-    const raw = localStorage.getItem(TEAM_INFO_CACHE_KEY);
-    if(!raw) return;
-    const parsed = JSON.parse(raw);
-    for(const teamKey of Object.keys(parsed)) teamInfoCache[teamKey] = parsed[teamKey];
+    for(let i = 0; i < localStorage.length; i++){
+      const key = localStorage.key(i);
+      if(!key || !key.startsWith(TEAM_INFO_CACHE_PREFIX)) continue;
+      const teamKey = key.slice(TEAM_INFO_CACHE_PREFIX.length);
+      const raw = localStorage.getItem(key);
+      if(raw) teamInfoCache[teamKey] = JSON.parse(raw);
+    }
   } catch (e){}
 }
 
@@ -1165,9 +1211,10 @@ async function fetchTeamInfoCached(teamKey, id, useV2){
   if(cached && (Date.now() - cached.fetchedAt) < TEAM_INFO_TTL_MS) return cached.info;
 
   const info = useV2 ? await fetchSportsDbV2Team(id) : await fetchJSON(`${API_BASE}lookupteam.php?id=${id}`);
-  teamInfoCache[teamKey] = { info, fetchedAt: Date.now() };
-  saveTeamInfoCache();
-  return info;
+  const entry = { info, fetchedAt: Date.now() };
+  teamInfoCache[teamKey] = entry;
+  saveTeamInfoToStorage(teamKey, entry);
+  return entry.info;
 }
 
 async function fetchTeamBundle(teamKey){
