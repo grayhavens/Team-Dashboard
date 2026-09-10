@@ -31,12 +31,13 @@ const DRAFT_TEAMS = [
 // leagueKey links each team to its LEAGUE_SCORING entry below.
 // draftTeamId links each team to its owner in DRAFT_TEAMS above.
 //
-// Only Josh's 21 teams (below) have full metadata (city, real
-// badge colors, live sportsdbId) filled in so far. The other 189
-// teams — one roster per drafter, pulled from the shared draft
-// spreadsheet — are appended further down as a skeleton: correct
-// name/league/owner, a league-colored placeholder badge, and no
-// live data yet. Fill those in incrementally as time allows.
+// Josh's 21 teams and all 18 other EPL clubs (below) have full
+// metadata (real badge colors, live sportsdbId/rundownTeamId) filled
+// in. The remaining 171 teams — one roster per drafter, pulled from
+// the shared draft spreadsheet, across NFL/NBA/NHL/MLB/WNBA/CFB/CBB —
+// are appended further down as a skeleton: correct name/league/owner,
+// a league-colored placeholder badge, and no live data yet. Fill
+// those in incrementally the same way EPL was done, league by league.
 const TEAM_META = {
   liverpool:  { name:'Liverpool',   leagueKey:'epl',  draftTeamId:'josh', boardSub:'Premier League', sub:"Premier League · '26/'27 Season", accent:'#C8102E', badgeStyle:'background:#C8102E; color:#F6EB61;', badgeText:'LFC',  sportsdbId:'133602', leagueId:'4328', season:'2026-2027', rundownTeamId:3446 },
   newcastle:  { name:'Newcastle',   leagueKey:'epl',  draftTeamId:'josh', boardSub:'Premier League', sub:"Premier League · '26/'27 Season", accent:'#241F20', badgeStyle:'background:#241F20; color:#FFFFFF;', badgeText:'NUFC', sportsdbId:'134777', leagueId:'4328', season:'2026-2027', rundownTeamId:3449 },
@@ -72,24 +73,24 @@ const TEAM_META = {
   utahstate:  { name:'Utah State',  leagueKey:'mcbb', draftTeamId:'josh', boardSub:'Aggies',       sub:'College Basketball · Aggies',       accent:'#0F2439', badgeStyle:'background:#0F2439; color:#FFFFFF;', badgeText:'USU', sportsdbId:null, rundownTeamId:348 },
 
   // ---- Skeleton: the other 9 drafters' rosters (189 teams) ----
-  isaac_arsenal: { name:'Arsenal', leagueKey:'epl', draftTeamId:'isaac', boardSub:'EPL', sub:"EPL · '26/'27 Season", accent:'#3D195B', badgeStyle:'background:#3D195B; color:#FFFFFF;', badgeText:'ARS', sportsdbId:null },
-  drew_mancity: { name:'Man City', leagueKey:'epl', draftTeamId:'drew', boardSub:'EPL', sub:"EPL · '26/'27 Season", accent:'#3D195B', badgeStyle:'background:#3D195B; color:#FFFFFF;', badgeText:'MC', sportsdbId:null },
-  douglas_everton: { name:'Everton', leagueKey:'epl', draftTeamId:'douglas', boardSub:'EPL', sub:"EPL · '26/'27 Season", accent:'#3D195B', badgeStyle:'background:#3D195B; color:#FFFFFF;', badgeText:'EVE', sportsdbId:null },
-  collin_chelsea: { name:'Chelsea', leagueKey:'epl', draftTeamId:'collin', boardSub:'EPL', sub:"EPL · '26/'27 Season", accent:'#3D195B', badgeStyle:'background:#3D195B; color:#FFFFFF;', badgeText:'CHE', sportsdbId:null },
-  erichylok_astonvilla: { name:'Aston Villa', leagueKey:'epl', draftTeamId:'erichylok', boardSub:'EPL', sub:"EPL · '26/'27 Season", accent:'#3D195B', badgeStyle:'background:#3D195B; color:#FFFFFF;', badgeText:'AV', sportsdbId:null },
-  patrick_manunited: { name:'Man United', leagueKey:'epl', draftTeamId:'patrick', boardSub:'EPL', sub:"EPL · '26/'27 Season", accent:'#3D195B', badgeStyle:'background:#3D195B; color:#FFFFFF;', badgeText:'MU', sportsdbId:null },
-  peter_tottenhamhotspur: { name:'Tottenham Hotspur', leagueKey:'epl', draftTeamId:'peter', boardSub:'EPL', sub:"EPL · '26/'27 Season", accent:'#3D195B', badgeStyle:'background:#3D195B; color:#FFFFFF;', badgeText:'TH', sportsdbId:null },
-  ericprister_crystalpalace: { name:'Crystal Palace', leagueKey:'epl', draftTeamId:'ericprister', boardSub:'EPL', sub:"EPL · '26/'27 Season", accent:'#3D195B', badgeStyle:'background:#3D195B; color:#FFFFFF;', badgeText:'CP', sportsdbId:null },
-  donny_brentford: { name:'Brentford', leagueKey:'epl', draftTeamId:'donny', boardSub:'EPL', sub:"EPL · '26/'27 Season", accent:'#3D195B', badgeStyle:'background:#3D195B; color:#FFFFFF;', badgeText:'BRE', sportsdbId:null },
-  isaac_ipswichtown: { name:'Ipswich Town', leagueKey:'epl', draftTeamId:'isaac', boardSub:'EPL', sub:"EPL · '26/'27 Season", accent:'#3D195B', badgeStyle:'background:#3D195B; color:#FFFFFF;', badgeText:'IT', sportsdbId:null },
-  drew_hullcity: { name:'Hull City', leagueKey:'epl', draftTeamId:'drew', boardSub:'EPL', sub:"EPL · '26/'27 Season", accent:'#3D195B', badgeStyle:'background:#3D195B; color:#FFFFFF;', badgeText:'HC', sportsdbId:null },
-  douglas_fulham: { name:'Fulham', leagueKey:'epl', draftTeamId:'douglas', boardSub:'EPL', sub:"EPL · '26/'27 Season", accent:'#3D195B', badgeStyle:'background:#3D195B; color:#FFFFFF;', badgeText:'FUL', sportsdbId:null },
-  collin_leedsunited: { name:'Leeds United', leagueKey:'epl', draftTeamId:'collin', boardSub:'EPL', sub:"EPL · '26/'27 Season", accent:'#3D195B', badgeStyle:'background:#3D195B; color:#FFFFFF;', badgeText:'LU', sportsdbId:null },
-  erichylok_nottingham: { name:'Nottingham', leagueKey:'epl', draftTeamId:'erichylok', boardSub:'EPL', sub:"EPL · '26/'27 Season", accent:'#3D195B', badgeStyle:'background:#3D195B; color:#FFFFFF;', badgeText:'NOT', sportsdbId:null },
-  patrick_brighton: { name:'Brighton', leagueKey:'epl', draftTeamId:'patrick', boardSub:'EPL', sub:"EPL · '26/'27 Season", accent:'#3D195B', badgeStyle:'background:#3D195B; color:#FFFFFF;', badgeText:'BRI', sportsdbId:null },
-  peter_afcbournemouth: { name:'AFC Bournemouth', leagueKey:'epl', draftTeamId:'peter', boardSub:'EPL', sub:"EPL · '26/'27 Season", accent:'#3D195B', badgeStyle:'background:#3D195B; color:#FFFFFF;', badgeText:'AB', sportsdbId:null },
-  ericprister_sunderland: { name:'Sunderland', leagueKey:'epl', draftTeamId:'ericprister', boardSub:'EPL', sub:"EPL · '26/'27 Season", accent:'#3D195B', badgeStyle:'background:#3D195B; color:#FFFFFF;', badgeText:'SUN', sportsdbId:null },
-  donny_coventrycity: { name:'Coventry City', leagueKey:'epl', draftTeamId:'donny', boardSub:'EPL', sub:"EPL · '26/'27 Season", accent:'#3D195B', badgeStyle:'background:#3D195B; color:#FFFFFF;', badgeText:'CC', sportsdbId:null },
+  isaac_arsenal: { name:'Arsenal', leagueKey:'epl', draftTeamId:'isaac', boardSub:'Premier League', sub:"Premier League · '26/'27 Season", accent:'#EF0107', badgeStyle:'background:#EF0107; color:#FFFFFF;', badgeText:'ARS', sportsdbId:'133604', leagueId:'4328', season:'2026-2027', rundownTeamId:3436 },
+  drew_mancity: { name:'Man City', leagueKey:'epl', draftTeamId:'drew', boardSub:'Premier League', sub:"Premier League · '26/'27 Season", accent:'#6CABDD', badgeStyle:'background:#6CABDD; color:#1C2C5B;', badgeText:'MC', sportsdbId:'133613', leagueId:'4328', season:'2026-2027', rundownTeamId:3447 },
+  douglas_everton: { name:'Everton', leagueKey:'epl', draftTeamId:'douglas', boardSub:'Premier League', sub:"Premier League · '26/'27 Season", accent:'#003399', badgeStyle:'background:#003399; color:#FFFFFF;', badgeText:'EVE', sportsdbId:'133615', leagueId:'4328', season:'2026-2027', rundownTeamId:3442 },
+  collin_chelsea: { name:'Chelsea', leagueKey:'epl', draftTeamId:'collin', boardSub:'Premier League', sub:"Premier League · '26/'27 Season", accent:'#034694', badgeStyle:'background:#034694; color:#FFFFFF;', badgeText:'CHE', sportsdbId:'133610', leagueId:'4328', season:'2026-2027', rundownTeamId:3440 },
+  erichylok_astonvilla: { name:'Aston Villa', leagueKey:'epl', draftTeamId:'erichylok', boardSub:'Premier League', sub:"Premier League · '26/'27 Season", accent:'#670E36', badgeStyle:'background:#670E36; color:#95BFE5;', badgeText:'AV', sportsdbId:'133601', leagueId:'4328', season:'2026-2027', rundownTeamId:3437 },
+  patrick_manunited: { name:'Man United', leagueKey:'epl', draftTeamId:'patrick', boardSub:'Premier League', sub:"Premier League · '26/'27 Season", accent:'#DA291C', badgeStyle:'background:#DA291C; color:#FFFFFF;', badgeText:'MU', sportsdbId:'133612', leagueId:'4328', season:'2026-2027', rundownTeamId:3448 },
+  peter_tottenhamhotspur: { name:'Tottenham Hotspur', leagueKey:'epl', draftTeamId:'peter', boardSub:'Premier League', sub:"Premier League · '26/'27 Season", accent:'#132257', badgeStyle:'background:#132257; color:#FFFFFF;', badgeText:'TH', sportsdbId:'133616', leagueId:'4328', season:'2026-2027', rundownTeamId:3452 },
+  ericprister_crystalpalace: { name:'Crystal Palace', leagueKey:'epl', draftTeamId:'ericprister', boardSub:'Premier League', sub:"Premier League · '26/'27 Season", accent:'#1B458F', badgeStyle:'background:#1B458F; color:#C4122E;', badgeText:'CP', sportsdbId:'133632', leagueId:'4328', season:'2026-2027', rundownTeamId:3441 },
+  donny_brentford: { name:'Brentford', leagueKey:'epl', draftTeamId:'donny', boardSub:'Premier League', sub:"Premier League · '26/'27 Season", accent:'#E30613', badgeStyle:'background:#E30613; color:#FFFFFF;', badgeText:'BRE', sportsdbId:'134355', leagueId:'4328', season:'2026-2027', rundownTeamId:3469 },
+  isaac_ipswichtown: { name:'Ipswich Town', leagueKey:'epl', draftTeamId:'isaac', boardSub:'Premier League', sub:"Premier League · '26/'27 Season", accent:'#0044A9', badgeStyle:'background:#0044A9; color:#FFFFFF;', badgeText:'IT', sportsdbId:'133622', leagueId:'4328', season:'2026-2027', rundownTeamId:10708 },
+  drew_hullcity: { name:'Hull City', leagueKey:'epl', draftTeamId:'drew', boardSub:'Premier League', sub:"Premier League · '26/'27 Season", accent:'#F18A00', badgeStyle:'background:#F18A00; color:#000000;', badgeText:'HC', sportsdbId:'133617', leagueId:'4328', season:'2026-2027', rundownTeamId:131655 },
+  douglas_fulham: { name:'Fulham', leagueKey:'epl', draftTeamId:'douglas', boardSub:'Premier League', sub:"Premier League · '26/'27 Season", accent:'#000000', badgeStyle:'background:#FFFFFF; color:#000000;', badgeText:'FUL', sportsdbId:'133600', leagueId:'4328', season:'2026-2027', rundownTeamId:3443 },
+  collin_leedsunited: { name:'Leeds United', leagueKey:'epl', draftTeamId:'collin', boardSub:'Premier League', sub:"Premier League · '26/'27 Season", accent:'#1D428A', badgeStyle:'background:#FFFFFF; color:#1D428A;', badgeText:'LU', sportsdbId:'133635', leagueId:'4328', season:'2026-2027', rundownTeamId:3444 },
+  erichylok_nottingham: { name:'Nottingham', leagueKey:'epl', draftTeamId:'erichylok', boardSub:'Premier League', sub:"Premier League · '26/'27 Season", accent:'#DD0000', badgeStyle:'background:#DD0000; color:#FFFFFF;', badgeText:'NOT', sportsdbId:'133720', leagueId:'4328', season:'2026-2027', rundownTeamId:4272 },
+  patrick_brighton: { name:'Brighton', leagueKey:'epl', draftTeamId:'patrick', boardSub:'Premier League', sub:"Premier League · '26/'27 Season", accent:'#0057B8', badgeStyle:'background:#0057B8; color:#FFFFFF;', badgeText:'BRI', sportsdbId:'133619', leagueId:'4328', season:'2026-2027', rundownTeamId:3438 },
+  peter_afcbournemouth: { name:'AFC Bournemouth', leagueKey:'epl', draftTeamId:'peter', boardSub:'Premier League', sub:"Premier League · '26/'27 Season", accent:'#DA291C', badgeStyle:'background:#DA291C; color:#000000;', badgeText:'AB', sportsdbId:'134301', leagueId:'4328', season:'2026-2027', rundownTeamId:4271 },
+  ericprister_sunderland: { name:'Sunderland', leagueKey:'epl', draftTeamId:'ericprister', boardSub:'Premier League', sub:"Premier League · '26/'27 Season", accent:'#EB172B', badgeStyle:'background:#EB172B; color:#000000;', badgeText:'SUN', sportsdbId:'133603', leagueId:'4328', season:'2026-2027', rundownTeamId:11054 },
+  donny_coventrycity: { name:'Coventry City', leagueKey:'epl', draftTeamId:'donny', boardSub:'Premier League', sub:"Premier League · '26/'27 Season", accent:'#78D0F1', badgeStyle:'background:#78D0F1; color:#1D1D1B;', badgeText:'CC', sportsdbId:'133625', leagueId:'4328', season:'2026-2027', rundownTeamId:131654 },
   isaac_eagles: { name:'Eagles', leagueKey:'nfl', draftTeamId:'isaac', boardSub:'NFL', sub:"NFL · '26 Season", accent:'#013369', badgeStyle:'background:#013369; color:#FFFFFF;', badgeText:'EAG', sportsdbId:null },
   drew_chiefs: { name:'Chiefs', leagueKey:'nfl', draftTeamId:'drew', boardSub:'NFL', sub:"NFL · '26 Season", accent:'#013369', badgeStyle:'background:#013369; color:#FFFFFF;', badgeText:'CHI', sportsdbId:null },
   douglas_texans: { name:'Texans', leagueKey:'nfl', draftTeamId:'douglas', boardSub:'NFL', sub:"NFL · '26 Season", accent:'#013369', badgeStyle:'background:#013369; color:#FFFFFF;', badgeText:'TEX', sportsdbId:null },

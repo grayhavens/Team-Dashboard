@@ -1,10 +1,11 @@
 /* ============================================================
    LIVE DATA: TheSportsDB v1 API
    Using the public free test key "123" — rate-limited to 30
-   requests/min. Each team's data is cached in memory after its
-   first fetch and refreshed on a staggered background schedule
-   (see bottom of file) rather than re-fetched on every click, so
-   opening a team you've already viewed this session is instant.
+   requests/min. Each team's data is cached in memory (and mirrored to
+   localStorage — see LIVE_DATA_CACHE_KEY below) after its first
+   fetch and refreshed on a staggered background schedule (see bottom
+   of file) rather than re-fetched on every click, so opening a team
+   you've already viewed is instant, even across browser sessions.
    If you upgrade to a premium key later (thesportsdb.com,
    ~$9/mo), just swap the "123" below for your own key.
    ============================================================ */
@@ -12,6 +13,7 @@ const API_BASE = 'https://www.thesportsdb.com/api/v1/json/123/';
 const ACHIEVEMENTS_KEY = 'teamDashboardAchievements';
 const LEAGUE_FACTS_KEY = 'teamDashboardLeagueFacts';
 const EPL_FACTS_MIGRATED_KEY = 'teamDashboardEplFactsMigrated';
+const LIVE_DATA_CACHE_KEY = 'teamDashboardLiveDataCache';
 
 /* ============================================================
    DASHBOARD WORKER: shared Cloudflare Worker — see
@@ -110,7 +112,7 @@ async function fetchRundownEventForTeam(meta){
 // confirm a device is actually running the latest build rather than
 // a stale cached copy — compare what's on screen to the version
 // mentioned when a change ships.
-const APP_VERSION = '2026.09.10-10';
+const APP_VERSION = '2026.09.10-13';
 
 // ---- Draft team selection ----
 // Which drafter's roster is currently shown on the Board/Standings
@@ -553,7 +555,44 @@ function renderTrackerSection(teamKey){
 // way EPL is done here.
 const EPL_LEAGUE_ID = '4328';
 const EPL_API_SEASON = '2026-2027';
-const eplStandingsCache = { table: null, error: false, loading: false };
+const EPL_STANDINGS_CACHE_KEY = 'teamDashboardEplStandingsCache';
+// How long a fetched table is trusted before a background refresh is
+// attempted again — matches the board's own ~15min refresh cadence.
+// Doesn't gate *display*: a stale cached table (even one restored from
+// localStorage from a previous session) is still shown immediately
+// rather than blocked on a fresh fetch — same "show what we have, then
+// quietly refresh" approach as the row-status pill cache.
+const EPL_STANDINGS_TTL_MS = 15 * 60 * 1000;
+const eplStandingsCache = { table: null, error: false, loading: false, fetchedAt: null };
+let eplStandingsPromise = null;
+
+function eplStandingsIsFresh(){
+  return !!eplStandingsCache.table && !!eplStandingsCache.fetchedAt && (Date.now() - eplStandingsCache.fetchedAt) < EPL_STANDINGS_TTL_MS;
+}
+
+function saveEplStandingsCache(){
+  try { localStorage.setItem(EPL_STANDINGS_CACHE_KEY, JSON.stringify(eplStandingsCache)); } catch (e){}
+}
+
+// One shared table for every EPL team — modal stats, the Standings
+// tab's League/Person views, and the League Facts rank-auto rules
+// (getEplRuleTeams below) all read eplStandingsCache.table directly
+// rather than each fetching or storing their own copy. This is what
+// keeps a growing roster of EPL teams (more drafters' clubs getting
+// wired up over time) at one request instead of one per team, and
+// keeps localStorage from ending up with N duplicate copies of the
+// same ~20-row table.
+function loadEplStandingsCache(){
+  try {
+    const raw = localStorage.getItem(EPL_STANDINGS_CACHE_KEY);
+    if(!raw) return;
+    const parsed = JSON.parse(raw);
+    if(parsed && parsed.table){
+      eplStandingsCache.table = parsed.table;
+      eplStandingsCache.fetchedAt = parsed.fetchedAt || null;
+    }
+  } catch (e){}
+}
 
 // A few real club names don't match our shorthand roster names
 // (e.g. "Man City" vs the API's "Manchester City") — normalize both
@@ -587,14 +626,36 @@ function abbrFromName(name){
   return (name || '').toUpperCase().slice(0, 3);
 }
 
-async function fetchEplStandingsTable(){
-  if(eplStandingsCache.table || eplStandingsCache.loading) return;
+// Callers (fetchTeamBundle for each EPL team, renderStandings) all
+// await the same in-flight promise when a fetch is already running,
+// instead of firing their own — this is the actual "load once" part.
+function fetchEplStandingsTable(){
+  if(eplStandingsCache.loading) return eplStandingsPromise;
+  if(eplStandingsIsFresh()) return Promise.resolve();
+
   eplStandingsCache.loading = true;
-  const data = await fetchJSON(`${API_BASE}lookuptable.php?l=${EPL_LEAGUE_ID}&s=${EPL_API_SEASON}`);
-  eplStandingsCache.loading = false;
-  if(data && data.table && data.table.length) eplStandingsCache.table = data.table;
-  else eplStandingsCache.error = true;
-  renderStandings();
+  eplStandingsPromise = (async () => {
+    const data = await fetchJSON(`${API_BASE}lookuptable.php?l=${EPL_LEAGUE_ID}&s=${EPL_API_SEASON}`);
+    eplStandingsCache.loading = false;
+    if(data && data.table && data.table.length){
+      eplStandingsCache.table = data.table;
+      eplStandingsCache.error = false;
+      eplStandingsCache.fetchedAt = Date.now();
+      saveEplStandingsCache();
+    } else if(!eplStandingsCache.table){
+      // Only flag "no data" if we never had a table to fall back on —
+      // a transient failure on a background refresh should keep
+      // showing the last-known-good table, not blank it out.
+      eplStandingsCache.error = true;
+    }
+    renderStandings();
+    // Modal stats (renderStats) read eplStandingsCache.table directly
+    // rather than storing their own copy, so if the currently-open
+    // team's modal is EPL, repaint it now that the table just changed.
+    const activeTeam = document.getElementById('modal-content').dataset.activeTeam;
+    if(activeTeam && liveDataCache[activeTeam]) renderLiveBundle(activeTeam, liveDataCache[activeTeam]);
+  })();
+  return eplStandingsPromise;
 }
 
 function renderStandingsRow(leagueKey, row){
@@ -791,6 +852,7 @@ function renderStandings(){
         ? computeEplDrafterCombined().map((row, i) => renderEplByDrafterRow(row, i + 1)).join('')
         : eplStandingsCache.table.map(row => renderStandingsRow('epl', row)).join('');
       bodyHtml = eplStandingsToggleHtml() + rowsHtml;
+      fetchEplStandingsTable(); // no-op if already fresh; quietly refreshes in the background if stale
     } else if(eplStandingsCache.error){
       bodyHtml = `<div class="no-live-note">No data available.</div>`;
     } else {
@@ -861,6 +923,42 @@ function renderOverallStandings(){
 
 const liveDataCache = {}; // teamKey -> { info, last, next, table, fetchedAt }
 
+// Mirrors liveDataCache to localStorage so a team's last-known result
+// survives across browser sessions — otherwise every fresh page load
+// starts with every row-status pill blank until that team's turn comes
+// up in the staggered background refresh (see REFRESH_STEP_MS below),
+// which can take up to ~15 minutes. This is a per-browser convenience
+// cache, not shared state — every viewer still fetches their own fresh
+// data on the same schedule as before; this only changes what shows
+// while waiting for that.
+function saveLiveDataCache(){
+  try {
+    localStorage.setItem(LIVE_DATA_CACHE_KEY, JSON.stringify(liveDataCache));
+  } catch (e){}
+}
+
+function setTeamBundle(teamKey, bundle){
+  liveDataCache[teamKey] = bundle;
+  saveLiveDataCache();
+}
+
+// Called once at boot, before the first paint, so cached pills show
+// immediately rather than blank. fetchedAt round-trips through
+// JSON.stringify as an ISO string, so it's parsed back into a Date
+// here — everything else in a bundle is plain JSON already.
+function loadLiveDataCache(){
+  try {
+    const raw = localStorage.getItem(LIVE_DATA_CACHE_KEY);
+    if(!raw) return;
+    const parsed = JSON.parse(raw);
+    for(const teamKey of Object.keys(parsed)){
+      const bundle = parsed[teamKey];
+      if(bundle && bundle.fetchedAt) bundle.fetchedAt = new Date(bundle.fetchedAt);
+      liveDataCache[teamKey] = bundle;
+    }
+  } catch (e){}
+}
+
 async function fetchJSON(url){
   try {
     const res = await fetch(url);
@@ -901,16 +999,21 @@ async function fetchTeamBundle(teamKey){
   // state for leagues in RUNDOWN_SPORT_ID (see fetchRundownEventForTeam).
   if(meta.sportsdbId){
     const id = meta.sportsdbId;
-    const [info, last, next, table, rundownEvent] = await Promise.all([
+    // Standings come from the one shared eplStandingsCache (see
+    // fetchEplStandingsTable) rather than each team fetching and
+    // storing its own copy of the same league table — renderStats
+    // reads eplStandingsCache.table directly, so nothing from that
+    // fetch needs to end up in this team's own bundle.
+    const [info, last, next, , rundownEvent] = await Promise.all([
       fetchJSON(`${API_BASE}lookupteam.php?id=${id}`),
       fetchJSON(`${API_BASE}eventslast.php?id=${id}`),
       fetchJSON(`${API_BASE}eventsnext.php?id=${id}`),
-      meta.leagueId ? fetchJSON(`${API_BASE}lookuptable.php?l=${meta.leagueId}&s=${meta.season}`) : Promise.resolve(null),
+      meta.leagueId ? fetchEplStandingsTable() : Promise.resolve(null),
       fetchRundownEventForTeam(meta)
     ]);
 
-    const bundle = { info, last, next, table, rundownEvent, rundownTeamId: meta.rundownTeamId || null, fetchedAt: new Date() };
-    liveDataCache[teamKey] = bundle;
+    const bundle = { info, last, next, rundownEvent, rundownTeamId: meta.rundownTeamId || null, fetchedAt: new Date() };
+    setTeamBundle(teamKey, bundle);
     return bundle;
   }
 
@@ -920,7 +1023,7 @@ async function fetchTeamBundle(teamKey){
   // see renderRowStatus/renderNext/renderForm for how that's rendered.
   const rundownEvent = await fetchRundownEventForTeam(meta);
   const bundle = { info: null, last: null, next: null, table: null, rundownEvent, rundownTeamId: meta.rundownTeamId, rundownOnly: true, fetchedAt: new Date() };
-  liveDataCache[teamKey] = bundle;
+  setTeamBundle(teamKey, bundle);
   return bundle;
 }
 
@@ -928,7 +1031,7 @@ function renderStats(id, bundle){
   const el = document.getElementById('live-stats');
   if(!el) return;
 
-  const row = bundle.table && bundle.table.table ? bundle.table.table.find(r => r.idTeam === id) : null;
+  const row = eplStandingsCache.table ? eplStandingsCache.table.find(r => r.idTeam === id) : null;
   if(row){
     el.innerHTML = `
       <div class="stat-cell"><div class="num">${ordinal(row.intRank)}</div><div class="lbl">Position</div></div>
@@ -1264,7 +1367,19 @@ const buildTagEl = document.getElementById('build-tag');
 if(buildTagEl) buildTagEl.textContent = APP_VERSION;
 
 migrateEplAchievementsToFacts();
+loadLiveDataCache();
+loadEplStandingsCache();
 renderBoard();
+
+// Paint every team's row-status pill from whatever's cached (possibly
+// from a previous browser session) before the first real fetch even
+// starts, so nothing sits blank waiting for its turn in the staggered
+// refresh below. TEAM_META[teamKey] is checked in case a cache entry
+// is left over from a team that no longer exists after a data.js edit.
+for(const teamKey of Object.keys(liveDataCache)){
+  if(TEAM_META[teamKey]) renderRowStatus(teamKey, liveDataCache[teamKey]);
+}
+
 backgroundRefreshTick();
 setInterval(backgroundRefreshTick, REFRESH_STEP_MS);
 
