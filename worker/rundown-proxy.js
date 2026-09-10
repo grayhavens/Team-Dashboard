@@ -63,12 +63,23 @@ function json(data, status, headers){
   });
 }
 
-async function handleRundownEvents(request, env, url, headers){
+async function proxyToRundown(rundownPath, env, headers){
+  const upstream = await fetch(`${RUNDOWN_BASE}${rundownPath}`, {
+    headers: { 'X-TheRundown-Key': env.THERUNDOWN_API_KEY }
+  });
+  const body = await upstream.text();
+  return new Response(body, {
+    status: upstream.status,
+    headers: { ...headers, 'Content-Type': 'application/json' }
+  });
+}
+
+async function handleRundownEvents(request, url, env, headers){
   if(request.method !== 'GET'){
     return new Response('Method not allowed', { status: 405, headers });
   }
 
-  // Only forward the one shape we need right now:
+  // Only forward the shapes we need right now:
   //   /events/{sportId}/{yyyy-mm-dd}  ->  TheRundown's
   //   /sports/{sportId}/events/{yyyy-mm-dd}
   // Extend this allowlist deliberately rather than proxying
@@ -76,16 +87,29 @@ async function handleRundownEvents(request, env, url, headers){
   const match = url.pathname.match(/^\/events\/(\d+)\/(\d{4}-\d{2}-\d{2})$/);
   if(!match) return new Response('Not found', { status: 404, headers });
   const [, sportId, date] = match;
+  // market_ids=1 (moneyline only) — we only ever read team/score/status
+  // off this response, never odds, so this trims the market/price rows
+  // TheRundown would otherwise bundle in by default. TheRundown's free
+  // tier meters by "data points" (not request count) and a full
+  // multi-sportsbook markets payload burns through that budget fast —
+  // confirmed 2026-09-10 when 36 unfiltered requests exhausted the
+  // 20,000/day cap. Effectiveness of this filter is unverified until
+  // the next UTC day's quota resets.
+  return proxyToRundown(`/sports/${sportId}/events/${date}?market_ids=1`, env, headers);
+}
 
-  const upstream = await fetch(`${RUNDOWN_BASE}/sports/${sportId}/events/${date}`, {
-    headers: { 'X-TheRundown-Key': env.THERUNDOWN_API_KEY }
-  });
+async function handleRundownTeams(request, url, env, headers){
+  if(request.method !== 'GET'){
+    return new Response('Method not allowed', { status: 405, headers });
+  }
 
-  const body = await upstream.text();
-  return new Response(body, {
-    status: upstream.status,
-    headers: { ...headers, 'Content-Type': 'application/json' }
-  });
+  // /teams/{sportId} -> TheRundown's /sports/{sportId}/teams
+  // One-off/occasional use: building & spot-checking the rundownTeamId
+  // mapping in js/data.js, not called on every app load.
+  const match = url.pathname.match(/^\/teams\/(\d+)$/);
+  if(!match) return new Response('Not found', { status: 404, headers });
+  const [, sportId] = match;
+  return proxyToRundown(`/sports/${sportId}/teams`, env, headers);
 }
 
 async function handleLeagueFacts(request, env, leagueKey, headers){
@@ -133,6 +157,8 @@ export default {
     const factsMatch = url.pathname.match(/^\/facts\/([a-z]+)$/);
     if(factsMatch) return handleLeagueFacts(request, env, factsMatch[1], headers);
 
-    return handleRundownEvents(request, env, url, headers);
+    if(url.pathname.startsWith('/teams/')) return handleRundownTeams(request, url, env, headers);
+
+    return handleRundownEvents(request, url, env, headers);
   }
 };

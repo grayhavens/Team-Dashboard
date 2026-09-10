@@ -23,6 +23,11 @@ const DRAFT_TEAMS = [
 // TheSportsDB team ID so we can pull live results. Teams with
 // sportsdbId: null don't have reliable live coverage yet (see
 // College Basketball below) and fall back to a plain notice.
+// rundownTeamId (TheRundown's team ID, matched against the sport_id
+// in RUNDOWN_SPORT_ID for the team's leagueKey — see js/app.js) adds
+// live in-game state on top of sportsdbId where present, or — for
+// College Basketball, which TheSportsDB doesn't carry — is the only
+// live source at all.
 // leagueKey links each team to its LEAGUE_SCORING entry below.
 // draftTeamId links each team to its owner in DRAFT_TEAMS above.
 //
@@ -33,37 +38,38 @@ const DRAFT_TEAMS = [
 // name/league/owner, a league-colored placeholder badge, and no
 // live data yet. Fill those in incrementally as time allows.
 const TEAM_META = {
-  liverpool:  { name:'Liverpool',   leagueKey:'epl',  draftTeamId:'josh', boardSub:'Premier League', sub:"Premier League · '26/'27 Season", accent:'#C8102E', badgeStyle:'background:#C8102E; color:#F6EB61;', badgeText:'LFC',  sportsdbId:'133602', leagueId:'4328', season:'2026-2027' },
-  newcastle:  { name:'Newcastle',   leagueKey:'epl',  draftTeamId:'josh', boardSub:'Premier League', sub:"Premier League · '26/'27 Season", accent:'#241F20', badgeStyle:'background:#241F20; color:#FFFFFF;', badgeText:'NUFC', sportsdbId:'134777', leagueId:'4328', season:'2026-2027' },
+  liverpool:  { name:'Liverpool',   leagueKey:'epl',  draftTeamId:'josh', boardSub:'Premier League', sub:"Premier League · '26/'27 Season", accent:'#C8102E', badgeStyle:'background:#C8102E; color:#F6EB61;', badgeText:'LFC',  sportsdbId:'133602', leagueId:'4328', season:'2026-2027', rundownTeamId:3446 },
+  newcastle:  { name:'Newcastle',   leagueKey:'epl',  draftTeamId:'josh', boardSub:'Premier League', sub:"Premier League · '26/'27 Season", accent:'#241F20', badgeStyle:'background:#241F20; color:#FFFFFF;', badgeText:'NUFC', sportsdbId:'134777', leagueId:'4328', season:'2026-2027', rundownTeamId:3449 },
 
-  lions:      { name:'Lions',       leagueKey:'nfl',  draftTeamId:'josh', boardSub:'Detroit',     sub:"NFL · Detroit · '26 Season",     accent:'#0076B6', badgeStyle:'background:#0076B6; color:#B0B7BC;', badgeText:'DET',  sportsdbId:'134939' },
-  steelers:   { name:'Steelers',    leagueKey:'nfl',  draftTeamId:'josh', boardSub:'Pittsburgh',  sub:"NFL · Pittsburgh · '26 Season",  accent:'#101820', badgeStyle:'background:#101820; color:#FFB612;', badgeText:'PIT',  sportsdbId:'134925' },
-  dolphins:   { name:'Dolphins',    leagueKey:'nfl',  draftTeamId:'josh', boardSub:'Miami',       sub:"NFL · Miami · '26 Season",       accent:'#008E97', badgeStyle:'background:#008E97; color:#F58220;', badgeText:'MIA',  sportsdbId:'134919' },
+  lions:      { name:'Lions',       leagueKey:'nfl',  draftTeamId:'josh', boardSub:'Detroit',     sub:"NFL · Detroit · '26 Season",     accent:'#0076B6', badgeStyle:'background:#0076B6; color:#B0B7BC;', badgeText:'DET',  sportsdbId:'134939', rundownTeamId:82 },
+  steelers:   { name:'Steelers',    leagueKey:'nfl',  draftTeamId:'josh', boardSub:'Pittsburgh',  sub:"NFL · Pittsburgh · '26 Season",  accent:'#101820', badgeStyle:'background:#101820; color:#FFB612;', badgeText:'PIT',  sportsdbId:'134925', rundownTeamId:68 },
+  dolphins:   { name:'Dolphins',    leagueKey:'nfl',  draftTeamId:'josh', boardSub:'Miami',       sub:"NFL · Miami · '26 Season",       accent:'#008E97', badgeStyle:'background:#008E97; color:#F58220;', badgeText:'MIA',  sportsdbId:'134919', rundownTeamId:62 },
 
-  cavaliers:  { name:'Cavaliers',   leagueKey:'nba',  draftTeamId:'josh', boardSub:'Cleveland',   sub:"NBA · Cleveland · '26/'27 Season", accent:'#860038', badgeStyle:'background:#860038; color:#FDBB30;', badgeText:'CLE',  sportsdbId:'134871' },
-  nuggets:    { name:'Nuggets',     leagueKey:'nba',  draftTeamId:'josh', boardSub:'Denver',      sub:"NBA · Denver · '26/'27 Season",   accent:'#0E2240', badgeStyle:'background:#0E2240; color:#FEC524;', badgeText:'DEN',  sportsdbId:'134885' },
-  mavericks:  { name:'Mavs',        leagueKey:'nba',  draftTeamId:'josh', boardSub:'Dallas',      sub:"NBA · Dallas · '26/'27 Season",   accent:'#00538C', badgeStyle:'background:#00538C; color:#B8C4CA;', badgeText:'DAL',  sportsdbId:'134875' },
+  cavaliers:  { name:'Cavaliers',   leagueKey:'nba',  draftTeamId:'josh', boardSub:'Cleveland',   sub:"NBA · Cleveland · '26/'27 Season", accent:'#860038', badgeStyle:'background:#860038; color:#FDBB30;', badgeText:'CLE',  sportsdbId:'134871', rundownTeamId:7 },
+  nuggets:    { name:'Nuggets',     leagueKey:'nba',  draftTeamId:'josh', boardSub:'Denver',      sub:"NBA · Denver · '26/'27 Season",   accent:'#0E2240', badgeStyle:'background:#0E2240; color:#FEC524;', badgeText:'DEN',  sportsdbId:'134885', rundownTeamId:16 },
+  mavericks:  { name:'Mavs',        leagueKey:'nba',  draftTeamId:'josh', boardSub:'Dallas',      sub:"NBA · Dallas · '26/'27 Season",   accent:'#00538C', badgeStyle:'background:#00538C; color:#B8C4CA;', badgeText:'DAL',  sportsdbId:'134875', rundownTeamId:26 },
 
-  lightning:  { name:'Lightning',   leagueKey:'nhl',  draftTeamId:'josh', boardSub:'Tampa Bay',   sub:"NHL · Tampa Bay · '26/'27 Season", accent:'#002868', badgeStyle:'background:#002868; color:#FFFFFF;', badgeText:'TBL',  sportsdbId:'134836' },
-  flyers:     { name:'Flyers',      leagueKey:'nhl',  draftTeamId:'josh', boardSub:'Philadelphia', sub:"NHL · Philadelphia · '26/'27 Season", accent:'#F74902', badgeStyle:'background:#F74902; color:#000000;', badgeText:'PHI',  sportsdbId:'134843' },
-  redwings:   { name:'Red Wings',   leagueKey:'nhl',  draftTeamId:'josh', boardSub:'Detroit',     sub:"NHL · Detroit · '26/'27 Season",  accent:'#CE1126', badgeStyle:'background:#CE1126; color:#FFFFFF;', badgeText:'DET',  sportsdbId:'134832' },
+  lightning:  { name:'Lightning',   leagueKey:'nhl',  draftTeamId:'josh', boardSub:'Tampa Bay',   sub:"NHL · Tampa Bay · '26/'27 Season", accent:'#002868', badgeStyle:'background:#002868; color:#FFFFFF;', badgeText:'TBL',  sportsdbId:'134836', rundownTeamId:105 },
+  flyers:     { name:'Flyers',      leagueKey:'nhl',  draftTeamId:'josh', boardSub:'Philadelphia', sub:"NHL · Philadelphia · '26/'27 Season", accent:'#F74902', badgeStyle:'background:#F74902; color:#000000;', badgeText:'PHI',  sportsdbId:'134843', rundownTeamId:96 },
+  redwings:   { name:'Red Wings',   leagueKey:'nhl',  draftTeamId:'josh', boardSub:'Detroit',     sub:"NHL · Detroit · '26/'27 Season",  accent:'#CE1126', badgeStyle:'background:#CE1126; color:#FFFFFF;', badgeText:'DET',  sportsdbId:'134832', rundownTeamId:110 },
 
-  cubs:       { name:'Cubs',        leagueKey:'mlb',  draftTeamId:'josh', boardSub:'Chicago',     sub:"MLB · Chicago · '27 Season",      accent:'#0E3386', badgeStyle:'background:#0E3386; color:#CC3433;', badgeText:'CHC',  sportsdbId:'135269' },
-  padres:     { name:'Padres',      leagueKey:'mlb',  draftTeamId:'josh', boardSub:'San Diego',   sub:"MLB · San Diego · '27 Season",    accent:'#2F241D', badgeStyle:'background:#2F241D; color:#FFC425;', badgeText:'SD',   sportsdbId:'135278' },
-  nationals:  { name:'Nationals',   leagueKey:'mlb',  draftTeamId:'josh', boardSub:'Washington',  sub:"MLB · Washington · '27 Season",   accent:'#AB0003', badgeStyle:'background:#AB0003; color:#FFFFFF;', badgeText:'WSH',  sportsdbId:'135281' },
+  cubs:       { name:'Cubs',        leagueKey:'mlb',  draftTeamId:'josh', boardSub:'Chicago',     sub:"MLB · Chicago · '27 Season",      accent:'#0E3386', badgeStyle:'background:#0E3386; color:#CC3433;', badgeText:'CHC',  sportsdbId:'135269', rundownTeamId:36 },
+  padres:     { name:'Padres',      leagueKey:'mlb',  draftTeamId:'josh', boardSub:'San Diego',   sub:"MLB · San Diego · '27 Season",    accent:'#2F241D', badgeStyle:'background:#2F241D; color:#FFC425;', badgeText:'SD',   sportsdbId:'135278', rundownTeamId:44 },
+  nationals:  { name:'Nationals',   leagueKey:'mlb',  draftTeamId:'josh', boardSub:'Washington',  sub:"MLB · Washington · '27 Season",   accent:'#AB0003', badgeStyle:'background:#AB0003; color:#FFFFFF;', badgeText:'WSH',  sportsdbId:'135281', rundownTeamId:35 },
 
-  valkyries:  { name:'Valkyries',   leagueKey:'wnba', draftTeamId:'josh', boardSub:'Golden State', sub:"WNBA · Golden State · '27 Season", accent:'#8A6BAF', badgeStyle:'background:#000000; color:#8A6BAF;', badgeText:'GSV',  sportsdbId:'150722' },
+  valkyries:  { name:'Valkyries',   leagueKey:'wnba', draftTeamId:'josh', boardSub:'Golden State', sub:"WNBA · Golden State · '27 Season", accent:'#8A6BAF', badgeStyle:'background:#000000; color:#8A6BAF;', badgeText:'GSV',  sportsdbId:'150722', rundownTeamId:10982 },
 
-  oregon:     { name:'Oregon',      leagueKey:'cfb',  draftTeamId:'josh', boardSub:'Ducks',       sub:"College Football · '26 Season",  accent:'#154733', badgeStyle:'background:#154733; color:#FEE123;', badgeText:'ORE',  sportsdbId:'136938', recentLabel:'Results So Far' },
-  texasam:    { name:'Texas A&M',   leagueKey:'cfb',  draftTeamId:'josh', boardSub:'Aggies',      sub:"College Football · '26 Season",  accent:'#500000', badgeStyle:'background:#500000; color:#FFFFFF;', badgeText:'A&M',  sportsdbId:'136959', recentLabel:'Results So Far' },
-  arizona:    { name:'Arizona',     leagueKey:'cfb',  draftTeamId:'josh', boardSub:'Wildcats',    sub:"College Football · '26 Season",  accent:'#AB0520', badgeStyle:'background:#AB0520; color:#0C234B;', badgeText:'ARIZ', sportsdbId:'136171', recentLabel:'Results So Far' },
+  oregon:     { name:'Oregon',      leagueKey:'cfb',  draftTeamId:'josh', boardSub:'Ducks',       sub:"College Football · '26 Season",  accent:'#154733', badgeStyle:'background:#154733; color:#FEE123;', badgeText:'ORE',  sportsdbId:'136938', recentLabel:'Results So Far', rundownTeamId:198 },
+  texasam:    { name:'Texas A&M',   leagueKey:'cfb',  draftTeamId:'josh', boardSub:'Aggies',      sub:"College Football · '26 Season",  accent:'#500000', badgeStyle:'background:#500000; color:#FFFFFF;', badgeText:'A&M',  sportsdbId:'136959', recentLabel:'Results So Far', rundownTeamId:218 },
+  arizona:    { name:'Arizona',     leagueKey:'cfb',  draftTeamId:'josh', boardSub:'Wildcats',    sub:"College Football · '26 Season",  accent:'#AB0520', badgeStyle:'background:#AB0520; color:#0C234B;', badgeText:'ARIZ', sportsdbId:'136171', recentLabel:'Results So Far', rundownTeamId:125 },
 
   // TheSportsDB doesn't carry a distinct entry for these three
-  // schools' basketball programs (only their football teams) —
-  // so no live fetch is attempted for them yet.
-  houston:    { name:'Houston',     leagueKey:'mcbb', draftTeamId:'josh', boardSub:'Cougars',      sub:'College Basketball · Cougars',      accent:'#C8102E', badgeStyle:'background:#C8102E; color:#FFFFFF;', badgeText:'HOU', sportsdbId:null },
-  purdue:     { name:'Purdue',      leagueKey:'mcbb', draftTeamId:'josh', boardSub:'Boilermakers', sub:'College Basketball · Boilermakers', accent:'#000000', badgeStyle:'background:#000000; color:#CEB888;', badgeText:'PUR', sportsdbId:null },
-  utahstate:  { name:'Utah State',  leagueKey:'mcbb', draftTeamId:'josh', boardSub:'Aggies',       sub:'College Basketball · Aggies',       accent:'#0F2439', badgeStyle:'background:#0F2439; color:#FFFFFF;', badgeText:'USU', sportsdbId:null },
+  // schools' basketball programs (only their football teams), so
+  // sportsdbId stays null — TheRundown (rundownTeamId, sport_id 5)
+  // is their only live source, not just a live-state supplement.
+  houston:    { name:'Houston',     leagueKey:'mcbb', draftTeamId:'josh', boardSub:'Cougars',      sub:'College Basketball · Cougars',      accent:'#C8102E', badgeStyle:'background:#C8102E; color:#FFFFFF;', badgeText:'HOU', sportsdbId:null, rundownTeamId:275 },
+  purdue:     { name:'Purdue',      leagueKey:'mcbb', draftTeamId:'josh', boardSub:'Boilermakers', sub:'College Basketball · Boilermakers', accent:'#000000', badgeStyle:'background:#000000; color:#CEB888;', badgeText:'PUR', sportsdbId:null, rundownTeamId:321 },
+  utahstate:  { name:'Utah State',  leagueKey:'mcbb', draftTeamId:'josh', boardSub:'Aggies',       sub:'College Basketball · Aggies',       accent:'#0F2439', badgeStyle:'background:#0F2439; color:#FFFFFF;', badgeText:'USU', sportsdbId:null, rundownTeamId:348 },
 
   // ---- Skeleton: the other 9 drafters' rosters (189 teams) ----
   isaac_arsenal: { name:'Arsenal', leagueKey:'epl', draftTeamId:'isaac', boardSub:'EPL', sub:"EPL · '26/'27 Season", accent:'#3D195B', badgeStyle:'background:#3D195B; color:#FFFFFF;', badgeText:'ARS', sportsdbId:null },
