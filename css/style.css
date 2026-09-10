@@ -21,6 +21,7 @@
   --draw-soft: rgba(184,163,105,0.16);
   --live: #E5484D;
   --live-soft: rgba(229,72,77,0.16);
+  --badge-surface: #E9E6DE;
   --nav-h: 74px;
 }
 
@@ -184,6 +185,7 @@ body{
 }
 
 .badge{
+  position: relative;
   flex: 0 0 44px;
   width: 44px;
   height: 44px;
@@ -196,6 +198,24 @@ body{
   letter-spacing: 0.2px;
   border-radius: 13px;
   border: 1px solid rgba(255,255,255,0.14);
+  overflow: hidden;
+}
+
+/* Real crests are transparent PNGs — a white backdrop keeps them
+   legible regardless of how close a team's own accent color is to its
+   crest's dominant color (see teamBadgeHtml in js/app.js). */
+.badge.badge-crest{
+  background: var(--badge-surface);
+}
+
+.badge img{
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  padding: 6px;
+  box-sizing: border-box;
 }
 
 .team-name{
@@ -675,6 +695,48 @@ body{
   border-color: transparent;
 }
 
+/* Rank-based rules (e.g. "2nd in EPL") that currently apply — amber
+   instead of the green/red used for a real, locked-in fact, since
+   these read straight off today's table and can still change before
+   the season ends. */
+.tracker-item.provisional .tracker-check{
+  background: var(--accent);
+  border-color: transparent;
+}
+
+.tracker-item.provisional .tracker-label{ color: var(--text); }
+
+.tracker-item.provisional .tracker-value{
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: transparent;
+}
+
+.provisional-tag{
+  display: inline-block;
+  margin-left: 6px;
+  font-family: 'Manrope', sans-serif;
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-border);
+  border-radius: 20px;
+  padding: 2px 6px;
+  vertical-align: middle;
+}
+
+.provisional-note{
+  display: inline-block;
+  margin-left: 10px;
+  padding-left: 10px;
+  border-left: 1px solid var(--accent-border);
+  color: var(--accent);
+  font-weight: 600;
+}
+
 .tracker-item.readonly{ cursor: default; }
 
 .tracker-manage-link{
@@ -1007,6 +1069,29 @@ body{
 
 .ob-chip.pos{ color: var(--win); background: var(--win-soft); border-color: transparent; }
 .ob-chip.neg{ color: var(--loss); background: var(--loss-soft); border-color: transparent; }
+
+/* Flags a league total (or grand total) that includes points from
+   current, not-yet-final standings — see computeTeamProvisionalPoints
+   in js/app.js. Hover for the exact amount. */
+.ob-chip-dot{
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--accent);
+  margin-right: 4px;
+  vertical-align: middle;
+}
+
+.overall-total-dot{
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--accent);
+  margin-right: 5px;
+  vertical-align: middle;
+}
 
 .overall-total{
   flex: 0 0 auto;
