@@ -1061,118 +1061,494 @@ body{
   border: 1px solid var(--accent-border);
 }
 
-/* ---- Overall view (cross-drafter leaderboard) ---- */
-.overall-list{
-  background: var(--surface);
-  border: 1px solid var(--hairline);
-  border-radius: 20px;
-  overflow: hidden;
-}
+/* ---- Overall view (cross-drafter leaderboard) ----
+   List (level 1) shows confirmed points only — a stacked league-mix bar
+   sized/colored by each league's confirmed points, plus the confirmed
+   total. Tapping a row expands it in place (level 1.5): confirmed
+   points per league, top confirmed awards, and a note pointing at any
+   provisional points sitting in the full breakdown (level 2), which
+   never touches the ranking number. */
 
-.overall-row{
+/* -- Real/Simulated data toggle + banner --
+   TEMPORARY: a preview aid for showing the page's shape before the
+   season produces real results. Safe to delete this block (and the
+   matching "TEMPORARY" block in js/app.js, and the toggle markup in
+   index.html) once real data makes it unnecessary. */
+.ob-mode{
+  margin-left: auto;
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 16px 18px;
-  cursor: pointer;
+  gap: 8px;
 }
-
-.overall-row:hover{ background: rgba(255,255,255,0.03); }
-
-.overall-row + .overall-row{
-  border-top: 1px solid rgba(255,255,255,0.06);
-}
-
-.overall-row.current{
-  background: var(--accent-soft);
-}
-
-.overall-rank{
-  flex: 0 0 28px;
-  text-align: center;
-  font-family: 'Space Grotesk', sans-serif;
-  font-weight: 700;
-  font-size: 15px;
-  color: var(--text-mute);
-}
-
-.overall-row:nth-child(1) .overall-rank{ color: var(--accent); }
-
-.overall-main{
-  flex: 1;
-  min-width: 0;
-}
-
-.overall-name{
-  font-weight: 700;
-  font-size: 16.5px;
-  letter-spacing: -0.1px;
-  margin-bottom: 6px;
-}
-
-.overall-breakdown{
-  display: flex;
-  gap: 6px;
-  overflow-x: auto;
-  scrollbar-width: none;
-  padding-bottom: 1px;
-}
-
-.overall-breakdown::-webkit-scrollbar{ display: none; }
-
-.ob-chip{
-  flex: 0 0 auto;
+.ob-mode-label{
   font-size: 10.5px;
   font-weight: 700;
-  letter-spacing: 0.1px;
-  white-space: nowrap;
-  padding: 3px 8px;
-  border-radius: 999px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
   color: var(--text-mute);
-  background: rgba(255,255,255,0.05);
+}
+.ob-mode-switch{
+  display: flex;
+  background: var(--surface);
   border: 1px solid var(--hairline);
-}
-
-.ob-chip.pos{ color: var(--win); background: var(--win-soft); border-color: transparent; }
-.ob-chip.neg{ color: var(--loss); background: var(--loss-soft); border-color: transparent; }
-
-/* Flags a league total (or grand total) that includes points from
-   current, not-yet-final standings — see computeTeamProvisionalPoints
-   in js/app.js. Hover for the exact amount. */
-.ob-chip-dot{
-  display: inline-block;
-  width: 5px;
-  height: 5px;
   border-radius: 999px;
-  background: var(--provisional);
-  margin-right: 4px;
-  vertical-align: middle;
+  padding: 3px;
+  gap: 2px;
 }
-
-.overall-total-dot{
-  display: inline-block;
-  width: 6px;
-  height: 6px;
-  border-radius: 999px;
-  background: var(--provisional);
-  margin-right: 5px;
-  vertical-align: middle;
-}
-
-.overall-total{
-  flex: 0 0 auto;
-  font-family: 'Space Grotesk', sans-serif;
+.ob-mode-btn{
+  font-family: 'Manrope', sans-serif;
+  font-size: 12px;
   font-weight: 700;
-  font-size: 15px;
-  padding: 6px 12px;
+  padding: 5px 12px;
   border-radius: 999px;
+  border: none;
+  background: transparent;
+  color: var(--text-mute);
+  cursor: pointer;
+}
+.ob-mode-btn.active{
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.ob-sim-banner{
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+/* -- Header stats -- */
+.ob-stats{
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.ob-stat{
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  padding: 10px 12px;
+}
+.ob-stat-num{
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 19px;
+  font-weight: 700;
+  color: var(--text);
   white-space: nowrap;
-  background: var(--win-soft);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ob-stat-lbl{
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-mute);
+  margin-top: 3px;
+}
+
+/* -- List -- */
+.ob-list{
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: 16px;
+  overflow: hidden;
+}
+.ob-row{ border-bottom: 1px solid var(--hairline); }
+.ob-row:last-child{ border-bottom: none; }
+.ob-row.leader{ background: var(--accent-soft); }
+.ob-row.expanded{ background: var(--surface-2); }
+.ob-row.current .ob-name{ color: var(--accent); }
+
+.ob-row-head{
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  min-height: 44px;
+  cursor: pointer;
+}
+.ob-rank{
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 15px;
+  font-weight: 700;
+  text-align: center;
+  color: var(--text-mute);
+}
+.ob-row.leader .ob-rank{ color: var(--accent); }
+.ob-row-main{ min-width: 0; }
+.ob-name{
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ob-mix-line{
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 7px;
+}
+.ob-mix{
+  flex: 1;
+  min-width: 0;
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+  display: flex;
+}
+.ob-mix-seg{ height: 100%; }
+.ob-mix-label{
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-mute);
+  white-space: nowrap;
+}
+.ob-total{
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 19px;
+  font-weight: 700;
+  text-align: right;
+  white-space: nowrap;
   color: var(--win);
 }
+.ob-total.neg{ color: var(--loss); }
+.ob-total.zero{ color: var(--text-mute); }
 
-.overall-total.zero{ color: var(--text-mute); background: transparent; border: 1.5px solid rgba(255,255,255,0.12); }
-.overall-total.neg{ background: var(--loss-soft); color: var(--loss); }
+/* -- Inline expand -- */
+.ob-expand{
+  padding: 2px 14px 16px;
+  border-top: 1px solid var(--hairline);
+}
+.ob-section-title{
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--text-mute);
+  padding: 16px 0 8px;
+}
+.ob-lg-row{
+  display: grid;
+  grid-template-columns: 8px 74px minmax(0, 1fr) 42px;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 0;
+}
+.ob-lg-dot{
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  flex: none;
+}
+.ob-lg-label{
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-sub);
+  white-space: nowrap;
+}
+.ob-lg-track{
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.05);
+  overflow: hidden;
+}
+.ob-lg-track span{
+  display: block;
+  height: 100%;
+}
+.ob-lg-pts,
+.ob-award-pts,
+.ob-rule-pts,
+.ob-card-pts{
+  font-family: 'Space Grotesk', sans-serif;
+  font-weight: 700;
+  text-align: right;
+  white-space: nowrap;
+  color: var(--win);
+}
+.ob-lg-pts{ font-size: 13px; }
+.ob-award-pts,
+.ob-rule-pts{ font-size: 15px; }
+.ob-card-pts{ font-size: 22px; }
+.ob-lg-pts.neg, .ob-award-pts.neg, .ob-rule-pts.neg, .ob-card-pts.neg{ color: var(--loss); }
+.ob-lg-pts.zero, .ob-award-pts.zero, .ob-rule-pts.zero, .ob-card-pts.zero{ color: var(--text-mute); }
+
+.ob-award-list{ display: flex; flex-direction: column; gap: 8px; }
+.ob-award{
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  background: var(--surface-2);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+.ob-award-label{
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1.3;
+  text-wrap: pretty;
+}
+.ob-award-meta,
+.ob-rule-meta{
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+  font-size: 11.5px;
+  color: var(--text-mute);
+  margin-top: 4px;
+}
+.ob-empty{
+  font-size: 12.5px;
+  color: var(--text-mute);
+  line-height: 1.5;
+  padding: 2px 0 4px;
+}
+
+/* The one place provisional shows on the list: a pointer to the
+   breakdown, never folded into a drafter's headline number. */
+.ob-pending{
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  background: var(--provisional-soft);
+  border: 1px solid var(--provisional-border);
+  border-radius: 10px;
+  padding: 9px 11px;
+  font-size: 12px;
+  color: var(--text-sub);
+}
+.ob-stripe-swatch{
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  flex: none;
+  background: repeating-linear-gradient(115deg, var(--provisional) 0 3px, var(--provisional-soft) 3px 6px);
+}
+
+.ob-detail-link{
+  display: block;
+  width: 100%;
+  margin-top: 14px;
+  min-height: 44px;
+  background: transparent;
+  border: 1px solid var(--hairline-strong);
+  border-radius: 10px;
+  color: var(--accent);
+  font-family: 'Manrope', sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.ob-detail-link:hover{
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+}
+.ob-foot{
+  padding: 16px 4px 8px;
+  font-size: 11px;
+  color: var(--text-mute);
+  line-height: 1.5;
+}
+
+/* -- Detail -- */
+.ob-back{
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  background: transparent;
+  border: none;
+  color: var(--text-sub);
+  font-family: 'Manrope', sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  min-height: 44px;
+  padding: 10px 2px;
+  cursor: pointer;
+}
+.ob-back:hover{ color: var(--text); }
+.ob-detail-head{
+  padding: 4px 2px 18px;
+  border-bottom: 1px solid var(--hairline);
+}
+.ob-detail-rank{
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.ob-detail-name{
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 32px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text);
+  margin: 6px 0 0;
+}
+.ob-detail-total{
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-top: 14px;
+}
+.ob-detail-total b{
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 44px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--text);
+}
+.ob-detail-total b.neg{ color: var(--loss); }
+.ob-detail-total span{
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-mute);
+}
+
+/* Confirmed vs provisional: texture, not just hue — the stripe reads
+   before any color is parsed. */
+.ob-split{
+  display: flex;
+  height: 10px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+  margin-top: 18px;
+}
+.ob-split-confirmed{ background: var(--win); }
+.ob-split-provisional{
+  background: repeating-linear-gradient(115deg, var(--provisional) 0 5px, var(--provisional-soft) 5px 10px);
+}
+.ob-split-legend{
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+  margin-top: 12px;
+}
+.ob-pill{
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 999px;
+  padding: 7px 12px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text);
+}
+.ob-pill i{
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+}
+.ob-pill.confirmed{
+  background: var(--win-soft);
+  border: 1px solid rgba(95, 184, 138, 0.28);
+}
+.ob-pill.confirmed i{ background: var(--win); }
+.ob-pill.provisional{
+  background: var(--provisional-soft);
+  border: 1px solid var(--provisional-border);
+}
+.ob-pill.provisional i{
+  background: repeating-linear-gradient(115deg, var(--provisional) 0 3px, var(--provisional-soft) 3px 6px);
+}
+.ob-split-note{
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--text-mute);
+  line-height: 1.5;
+  text-wrap: pretty;
+}
+
+.ob-cards{ display: flex; flex-direction: column; gap: 10px; }
+.ob-card{
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: 14px;
+  padding: 14px;
+}
+.ob-card-head{
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+}
+.ob-card-main{ min-width: 0; }
+.ob-card-title{
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+}
+.ob-card-sub{
+  font-size: 11.5px;
+  color: var(--text-mute);
+  margin-top: 2px;
+  line-height: 1.4;
+}
+.ob-rule-list{
+  margin-top: 12px;
+  border-top: 1px solid var(--hairline);
+  padding-top: 4px;
+}
+.ob-rule{
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 0;
+  cursor: pointer;
+}
+.ob-rule-main{ min-width: 0; }
+.ob-rule-label{
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1.3;
+  text-wrap: pretty;
+}
+.ob-prov-tag{
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--provisional);
+  border: 1px solid var(--provisional-border);
+  border-radius: 4px;
+  padding: 2px 5px;
+}
+.ob-card-prov{
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--hairline);
+  font-size: 11.5px;
+  color: var(--text-sub);
+  line-height: 1.4;
+}
 
 /* ---- Views + bottom tab bar ---- */
 .view{ display: none; }

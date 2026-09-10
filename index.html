@@ -40,7 +40,20 @@
 
   <div id="view-overall" class="view">
     <div class="page-header">
-      <h1>Overall</h1>
+      <div class="page-header-top">
+        <h1>Overall</h1>
+        <!-- Simulated-data preview toggle — see the "TEMPORARY" block in
+             js/app.js. Remove this control (and that block) once the
+             season is far enough along that a fake preview is no
+             longer useful. -->
+        <div class="ob-mode" id="ob-mode">
+          <span class="ob-mode-label">Data</span>
+          <div class="ob-mode-switch">
+            <button type="button" class="ob-mode-btn active" data-mode="real" onclick="setObMode('real')">Real</button>
+            <button type="button" class="ob-mode-btn" data-mode="simulated" onclick="setObMode('simulated')">Simulated</button>
+          </div>
+        </div>
+      </div>
       <div class="page-sub">All 10 drafters, ranked by total points across every league</div>
     </div>
     <div id="overall-content"></div>
