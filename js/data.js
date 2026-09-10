@@ -285,7 +285,8 @@ const LEAGUE_SCORING = {
       { label: '2nd in EPL', pts: 6 },
       { label: 'Win EPL', pts: 9 },
       { label: 'Relegation', pts: -5 }
-    ]
+    ],
+    bonus: { label: 'Highest combined win-loss-draw point total across your teams', pts: 5 }
   },
   nfl: {
     name: 'NFL',
@@ -300,7 +301,8 @@ const LEAGUE_SCORING = {
       { label: 'Win Super Bowl', pts: 5 },
       { label: 'Last place in division', pts: -2 },
       { label: 'Worst record in conference', pts: -3 }
-    ]
+    ],
+    bonus: { label: 'Best combined win percentage across your teams', pts: 5 }
   },
   nba: {
     name: 'NBA',
@@ -315,7 +317,8 @@ const LEAGUE_SCORING = {
       { label: 'Win Finals', pts: 5 },
       { label: 'Last place in division', pts: -2 },
       { label: 'Worst record in conference', pts: -3 }
-    ]
+    ],
+    bonus: { label: 'Best combined win percentage across your teams', pts: 5 }
   },
   nhl: {
     name: 'NHL',
@@ -330,7 +333,8 @@ const LEAGUE_SCORING = {
       { label: 'Win Stanley Cup Finals', pts: 5 },
       { label: 'Last place in division', pts: -2 },
       { label: 'Worst record in conference', pts: -3 }
-    ]
+    ],
+    bonus: { label: 'Best combined win percentage across your teams', pts: 5 }
   },
   mlb: {
     name: 'MLB',
@@ -345,7 +349,8 @@ const LEAGUE_SCORING = {
       { label: 'Win World Series', pts: 5 },
       { label: 'Last place in division', pts: -2 },
       { label: 'Worst record in league', pts: -3 }
-    ]
+    ],
+    bonus: { label: 'Best combined win percentage across your teams', pts: 5 }
   },
   wnba: {
     name: 'WNBA',
@@ -361,7 +366,8 @@ const LEAGUE_SCORING = {
       { label: 'Win the Finals', pts: 5 },
       { label: 'Missing the playoffs', pts: -3 },
       { label: 'Bottom-three record', pts: -2 }
-    ]
+    ],
+    bonus: { label: 'Best combined win percentage across your teams', pts: 5 }
   },
   cfb: {
     name: 'College FB',
@@ -377,7 +383,8 @@ const LEAGUE_SCORING = {
       { label: 'Win National Championship', pts: 5 },
       { label: 'Don’t make a bowl', pts: -2 },
       { label: 'Finish last in conference', pts: -3 }
-    ]
+    ],
+    bonus: { label: 'Best combined win percentage across your teams', pts: 5 }
   },
   mcbb: {
     name: 'College BB',
@@ -392,6 +399,7 @@ const LEAGUE_SCORING = {
       { label: 'Win National Championship', pts: 5 },
       { label: 'Don’t make NCAA tournament', pts: -2 },
       { label: 'Finish last in conference', pts: -3 }
-    ]
+    ],
+    bonus: { label: 'Best combined win percentage across your teams', pts: 5 }
   }
 };
