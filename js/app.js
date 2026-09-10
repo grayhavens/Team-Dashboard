@@ -11,6 +11,13 @@
 const API_BASE = 'https://www.thesportsdb.com/api/v1/json/123/';
 const ACHIEVEMENTS_KEY = 'teamDashboardAchievements';
 
+// Bump this on every deploy that changes what's on screen. It's shown
+// in the corner of the app (see #build-tag in index.html) so you can
+// confirm a device is actually running the latest build rather than
+// a stale cached copy — compare what's on screen to the version
+// mentioned when a change ships.
+const APP_VERSION = '2026.09.10-3';
+
 // ---- Draft team selection ----
 // Which drafter's roster is currently shown on the Board/Standings
 // views. Persisted in localStorage so a reload stays on the same
@@ -655,6 +662,9 @@ async function backgroundRefreshTick(){
 }
 
 // ---- Boot ----
+
+const buildTagEl = document.getElementById('build-tag');
+if(buildTagEl) buildTagEl.textContent = APP_VERSION;
 
 renderBoard();
 backgroundRefreshTick();
