@@ -19,29 +19,90 @@ const EPL_FACTS_MIGRATED_KEY = 'teamDashboardEplFactsMigrated';
 
    1. Proxies a handful of TheRundown requests (its API key can't be
       embedded in client JS the way TheSportsDB's public test key
-      can). Used here purely for a console-only data-quality
-      comparison against TheSportsDB — touches nothing else in the
-      app.
+      can). TheRundown supplements — never replaces — TheSportsDB:
+      it adds live in-game state (score/clock while a match is
+      actually in progress), which TheSportsDB's free tier doesn't
+      have. Only teams with a rundownTeamId set in js/data.js (see
+      RUNDOWN_SPORT_ID below for which leagues that covers so far)
+      get this; everyone else is untouched.
    2. Stores the League Facts data (see below) in Workers KV so a
       mark made by one drafter is visible to everyone, instead of
       sitting in just their own browser's localStorage.
 
-   Leave DASHBOARD_WORKER_BASE empty to turn both off — the Rundown
-   comparison becomes a no-op and League Facts falls back to
+   Leave DASHBOARD_WORKER_BASE empty to turn both off — the
+   TheRundown lookups become a no-op (teams fall back to their
+   existing TheSportsDB-only display) and League Facts falls back to
    localStorage-only (not shared, but still functional).
    ============================================================ */
 const DASHBOARD_WORKER_BASE = 'https://team-dashboard-rundown-proxy.boxscore.workers.dev';
-const RUNDOWN_EPL_SPORT_ID = 11;
 
-async function fetchRundownComparison(){
-  if(!DASHBOARD_WORKER_BASE) return;
+// Which TheRundown sport_id each leagueKey maps to. Only leagues
+// listed here get the live in-game-state supplement — add a league
+// only after its rundownTeamId mappings have been verified against
+// real fixtures (see worker/rundown-proxy.js's /teams/{sportId}).
+const RUNDOWN_SPORT_ID = {
+  epl: 11,
+  mcbb: 5,
+  nfl: 2,
+  nba: 4,
+  nhl: 6,
+  mlb: 3,
+  wnba: 8,
+  cfb: 1
+};
+
+// TheRundown event_status values that mean "the game is happening
+// right now" — see https://docs.therundown.io/reference — as
+// opposed to STATUS_SCHEDULED (hasn't started) or STATUS_FINAL /
+// STATUS_POSTPONED / STATUS_CANCELED (already over / not happening).
+const RUNDOWN_LIVE_STATUSES = new Set(['STATUS_IN_PROGRESS', 'STATUS_HALFTIME', 'STATUS_END_PERIOD']);
+
+// A day's full slate for a league rarely changes within a few
+// minutes, and every team in that league shares one slate — so this
+// caches by leagueKey+date for a short TTL rather than re-fetching
+// per team. Keeps live-score staleness bounded to ~1 minute while
+// still collapsing near-simultaneous requests (e.g. a background
+// tick and a modal open) into one network call.
+const RUNDOWN_CACHE_TTL_MS = 60 * 1000;
+const rundownDayCache = {};
+
+async function fetchRundownDayEvents(leagueKey, dateStr){
+  const sportId = RUNDOWN_SPORT_ID[leagueKey];
+  if(!DASHBOARD_WORKER_BASE || !sportId) return null;
+
+  const cacheKey = `${leagueKey}:${dateStr}`;
+  const cached = rundownDayCache[cacheKey];
+  if(cached && (Date.now() - cached.fetchedAt) < RUNDOWN_CACHE_TTL_MS) return cached.data;
+
   try {
-    const today = new Date().toISOString().slice(0, 10);
-    const data = await fetchJSON(`${DASHBOARD_WORKER_BASE}/events/${RUNDOWN_EPL_SPORT_ID}/${today}`);
-    console.log('[TheRundown comparison] EPL events for', today, data);
+    const data = await fetchJSON(`${DASHBOARD_WORKER_BASE}/events/${sportId}/${dateStr}`);
+    rundownDayCache[cacheKey] = { data, fetchedAt: Date.now() };
+    return data;
   } catch(err) {
-    console.warn('[TheRundown comparison] fetch failed', err);
+    console.warn('[TheRundown]', leagueKey, 'events fetch failed', err);
+    return null;
   }
+}
+
+function findRundownEventForTeam(dayEvents, rundownTeamId){
+  if(!dayEvents || !dayEvents.events || !rundownTeamId) return null;
+  return dayEvents.events.find(e => (e.teams || []).some(t => t.team_id === rundownTeamId)) || null;
+}
+
+function isRundownEventLive(event){
+  return !!event && RUNDOWN_LIVE_STATUSES.has(event.score && event.score.event_status);
+}
+
+// Looks up today's TheRundown event for a team, if that team's
+// league has been migrated (RUNDOWN_SPORT_ID) and has a
+// rundownTeamId set. Uses the viewer's UTC date, same as TheRundown's
+// day boundary — a game starting right at that boundary may show up
+// a refresh cycle late, which self-corrects on the next tick.
+async function fetchRundownEventForTeam(meta){
+  if(!meta.rundownTeamId || !RUNDOWN_SPORT_ID[meta.leagueKey]) return null;
+  const today = new Date().toISOString().slice(0, 10);
+  const dayEvents = await fetchRundownDayEvents(meta.leagueKey, today);
+  return findRundownEventForTeam(dayEvents, meta.rundownTeamId);
 }
 
 // Bump this on every deploy that changes what's on screen. It's shown
@@ -49,7 +110,7 @@ async function fetchRundownComparison(){
 // confirm a device is actually running the latest build rather than
 // a stale cached copy — compare what's on screen to the version
 // mentioned when a change ships.
-const APP_VERSION = '2026.09.10-6';
+const APP_VERSION = '2026.09.10-10';
 
 // ---- Draft team selection ----
 // Which drafter's roster is currently shown on the Board/Standings
@@ -117,8 +178,8 @@ function renderBoard(){
     return `
       <div class="league" id="league-${league.key}">
         <div class="league-tab">
-          <div class="league-tab-left">${league.label} <div class="scoring-chip" onclick="openLeagueModal('${league.key}')">Scoring</div></div>
-          <span class="n">${league.season}</span>
+          <div class="league-tab-left">${league.label} <span class="n">${league.season}</span></div>
+          <span class="n">Last Result</span>
         </div>
         ${teamsHtml}
       </div>
@@ -833,17 +894,32 @@ function formatUpdatedAt(date){
 
 async function fetchTeamBundle(teamKey){
   const meta = TEAM_META[teamKey];
-  if(!meta || !meta.sportsdbId) return null;
-  const id = meta.sportsdbId;
+  if(!meta || (!meta.sportsdbId && !meta.rundownTeamId)) return null;
 
-  const [info, last, next, table] = await Promise.all([
-    fetchJSON(`${API_BASE}lookupteam.php?id=${id}`),
-    fetchJSON(`${API_BASE}eventslast.php?id=${id}`),
-    fetchJSON(`${API_BASE}eventsnext.php?id=${id}`),
-    meta.leagueId ? fetchJSON(`${API_BASE}lookuptable.php?l=${meta.leagueId}&s=${meta.season}`) : Promise.resolve(null)
-  ]);
+  // TheSportsDB-primary teams (the common case): everything comes from
+  // TheSportsDB, optionally supplemented with TheRundown's in-game
+  // state for leagues in RUNDOWN_SPORT_ID (see fetchRundownEventForTeam).
+  if(meta.sportsdbId){
+    const id = meta.sportsdbId;
+    const [info, last, next, table, rundownEvent] = await Promise.all([
+      fetchJSON(`${API_BASE}lookupteam.php?id=${id}`),
+      fetchJSON(`${API_BASE}eventslast.php?id=${id}`),
+      fetchJSON(`${API_BASE}eventsnext.php?id=${id}`),
+      meta.leagueId ? fetchJSON(`${API_BASE}lookuptable.php?l=${meta.leagueId}&s=${meta.season}`) : Promise.resolve(null),
+      fetchRundownEventForTeam(meta)
+    ]);
 
-  const bundle = { info, last, next, table, fetchedAt: new Date() };
+    const bundle = { info, last, next, table, rundownEvent, rundownTeamId: meta.rundownTeamId || null, fetchedAt: new Date() };
+    liveDataCache[teamKey] = bundle;
+    return bundle;
+  }
+
+  // Rundown-only teams (currently just College Basketball, which
+  // TheSportsDB doesn't carry at all): TheRundown is the sole live
+  // source. Scoped to today's slate only, not a multi-day lookahead —
+  // see renderRowStatus/renderNext/renderForm for how that's rendered.
+  const rundownEvent = await fetchRundownEventForTeam(meta);
+  const bundle = { info: null, last: null, next: null, table: null, rundownEvent, rundownTeamId: meta.rundownTeamId, rundownOnly: true, fetchedAt: new Date() };
   liveDataCache[teamKey] = bundle;
   return bundle;
 }
@@ -872,16 +948,39 @@ function renderStats(id, bundle){
     return;
   }
 
-  el.innerHTML = `<div class="stat-cell" style="flex:1;"><div class="lbl">Live stats unavailable right now</div></div>`;
+  el.innerHTML = bundle.rundownOnly
+    ? `<div class="stat-cell" style="flex:1;"><div class="lbl">Team info isn't available from this data source</div></div>`
+    : `<div class="stat-cell" style="flex:1;"><div class="lbl">Live stats unavailable right now</div></div>`;
 }
 
 function renderForm(id, bundle){
   const el = document.getElementById('live-form');
   if(!el) return;
 
+  const rStatus = bundle.rundownEvent && bundle.rundownEvent.score && bundle.rundownEvent.score.event_status;
+  if(rStatus === 'STATUS_FINAL'){
+    const line = rundownEventLine(bundle.rundownEvent, bundle.rundownTeamId);
+    let result = 'd', label = 'D';
+    if(line.own > line.opp){ result = 'w'; label = 'W'; }
+    else if(line.own < line.opp){ result = 'l'; label = 'L'; }
+    el.innerHTML = `
+      <div class="form-item">
+        <div class="form-pill ${result}">${label}</div>
+        <div class="form-detail">
+          <span class="opp">${line.opponentName}</span>
+          <span class="meta">${line.isHome ? 'Home' : 'Away'}</span>
+        </div>
+        <div class="form-score">${line.own}–${line.opp}</div>
+      </div>
+    `;
+    return;
+  }
+
   const evt = bundle.last && bundle.last.results && bundle.last.results[0];
   if(!evt){
-    el.innerHTML = `<div class="loading-note">No recent result found.</div>`;
+    el.innerHTML = bundle.rundownOnly
+      ? `<div class="loading-note">No recent result — check back once the season's underway.</div>`
+      : `<div class="loading-note">No recent result found.</div>`;
     return;
   }
 
@@ -908,13 +1007,57 @@ function renderForm(id, bundle){
   `;
 }
 
+// Shared by renderNext, renderForm and renderRowStatus: pulls this
+// team's own score, the opponent's score/name, and a human
+// clock/period label out of a TheRundown event, from that team's
+// perspective — live or not; callers branch on event_status first.
+function rundownEventLine(event, rundownTeamId){
+  const s = event.score;
+  const isHome = s.team_id_home === rundownTeamId;
+  const own = isHome ? s.score_home : s.score_away;
+  const opp = isHome ? s.score_away : s.score_home;
+  const opponent = (event.teams || []).find(t => t.team_id !== rundownTeamId);
+  const period = s.display_clock || s.event_status_detail || 'Live';
+  return { isHome, own, opp, opponentName: (opponent && opponent.name) || 'TBD', period };
+}
+
 function renderNext(id, bundle){
   const el = document.getElementById('live-next');
   if(!el) return;
 
+  const rEvt = bundle.rundownEvent;
+  const rStatus = rEvt && rEvt.score && rEvt.score.event_status;
+
+  if(isRundownEventLive(rEvt)){
+    const line = rundownEventLine(rEvt, bundle.rundownTeamId);
+    el.innerHTML = `
+      <div class="nm-left">
+        <div class="nm-teams">${line.isHome ? 'vs' : 'at'} ${line.opponentName}</div>
+        <div class="nm-when"><span class="live-badge">LIVE</span> ${line.own}-${line.opp} · ${line.period}</div>
+      </div>
+    `;
+    return;
+  }
+
+  // Rundown-only teams have no TheSportsDB eventsnext to fall back to,
+  // so a scheduled-for-today game (found via fetchRundownEventForTeam,
+  // which only checks today — see fetchTeamBundle) is shown here too.
+  if(rStatus === 'STATUS_SCHEDULED'){
+    const line = rundownEventLine(rEvt, bundle.rundownTeamId);
+    el.innerHTML = `
+      <div class="nm-left">
+        <div class="nm-teams">${line.isHome ? 'vs' : 'at'} ${line.opponentName}</div>
+        <div class="nm-when">${formatKickoff(rEvt.event_date)}${line.isHome ? ' · Home' : ' · Away'}</div>
+      </div>
+    `;
+    return;
+  }
+
   const evt = bundle.next && bundle.next.events && bundle.next.events[0];
   if(!evt){
-    el.innerHTML = `<div class="loading-note">No upcoming match scheduled yet.</div>`;
+    el.innerHTML = bundle.rundownOnly
+      ? `<div class="loading-note">No game scheduled today — check back once the season's underway.</div>`
+      : `<div class="loading-note">No upcoming match scheduled yet.</div>`;
     return;
   }
 
@@ -943,6 +1086,35 @@ function renderRowStatus(teamKey, bundle){
   if(!el) return;
   const meta = TEAM_META[teamKey];
   const id = meta.sportsdbId;
+
+  const rEvt = bundle.rundownEvent;
+  const rStatus = rEvt && rEvt.score && rEvt.score.event_status;
+
+  if(isRundownEventLive(rEvt)){
+    const line = rundownEventLine(rEvt, bundle.rundownTeamId);
+    el.textContent = `LIVE ${line.own}-${line.opp}`;
+    el.className = 'row-status live';
+    return;
+  }
+
+  // Rundown-only teams (no TheSportsDB fallback) get their today's-game
+  // result/fixture straight from the same event checked for live state.
+  if(bundle.rundownOnly && rStatus === 'STATUS_FINAL'){
+    const line = rundownEventLine(rEvt, bundle.rundownTeamId);
+    let cls = 'd', label = 'D';
+    if(line.own > line.opp){ cls = 'w'; label = 'W'; } else if(line.own < line.opp){ cls = 'l'; label = 'L'; }
+    el.textContent = `${label} ${line.own}-${line.opp}`;
+    el.className = 'row-status ' + cls;
+    return;
+  }
+  if(bundle.rundownOnly && rStatus === 'STATUS_SCHEDULED' && rEvt.event_date){
+    const d = new Date(rEvt.event_date);
+    if(!isNaN(d.getTime())){
+      el.textContent = 'Today ' + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+      el.className = 'row-status next';
+      return;
+    }
+  }
 
   const nextEvt = bundle.next && bundle.next.events && bundle.next.events[0];
   if(nextEvt && nextEvt.strTimestamp){
@@ -1007,7 +1179,7 @@ function openTeamModal(teamKey){
   modalContent.dataset.activeTeam = teamKey;
   modalContent.dataset.activeLeagueResults = '';
 
-  const hasLive = !!meta.sportsdbId;
+  const hasLive = !!meta.sportsdbId || !!meta.rundownTeamId;
   const cached = hasLive ? liveDataCache[teamKey] : null;
   const tracker = trackerSectionHtml(teamKey);
 
@@ -1058,7 +1230,7 @@ document.addEventListener('keydown', (e) => {
 });
 
 /* ---- Staggered background refresh ----
-   Refreshing all 18 live teams at once every few minutes would
+   Refreshing all 21 live teams at once every few minutes would
    burst 50-70 requests in a single second. Instead we refresh one
    team at a time on a rotating schedule, so the whole board cycles
    through a refresh roughly every 15 minutes while only ever
@@ -1068,7 +1240,7 @@ document.addEventListener('keydown', (e) => {
    team's modal happens to be open when its turn comes up, it
    updates live and the "Last updated" time ticks forward right in
    front of you. */
-const LIVE_TEAM_KEYS = Object.keys(TEAM_META).filter(k => TEAM_META[k].sportsdbId);
+const LIVE_TEAM_KEYS = Object.keys(TEAM_META).filter(k => TEAM_META[k].sportsdbId || TEAM_META[k].rundownTeamId);
 const REFRESH_CYCLE_MS = 15 * 60 * 1000;
 const REFRESH_STEP_MS = LIVE_TEAM_KEYS.length ? REFRESH_CYCLE_MS / LIVE_TEAM_KEYS.length : REFRESH_CYCLE_MS;
 let refreshCursor = 0;
@@ -1095,7 +1267,6 @@ migrateEplAchievementsToFacts();
 renderBoard();
 backgroundRefreshTick();
 setInterval(backgroundRefreshTick, REFRESH_STEP_MS);
-fetchRundownComparison();
 
 if('serviceWorker' in navigator){
   window.addEventListener('load', () => {

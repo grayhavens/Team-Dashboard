@@ -19,6 +19,8 @@
   --loss-soft: rgba(217,112,102,0.14);
   --draw: #B8A369;
   --draw-soft: rgba(184,163,105,0.16);
+  --live: #E5484D;
+  --live-soft: rgba(229,72,77,0.16);
   --nav-h: 74px;
 }
 
@@ -284,6 +286,10 @@ body{
   font-weight: 700;
   font-size: 10.5px;
   text-transform: uppercase;
+}
+.row-status.live{
+  background: var(--live-soft);
+  color: var(--live);
 }
 
 /* ---- Modal ---- */
