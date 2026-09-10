@@ -11,6 +11,33 @@
 const API_BASE = 'https://www.thesportsdb.com/api/v1/json/123/';
 const ACHIEVEMENTS_KEY = 'teamDashboardAchievements';
 
+/* ============================================================
+   COMPARISON PROTOTYPE: TheRundown (EPL only, console-only)
+
+   TheRundown's API key can't be embedded in client JS (unlike
+   TheSportsDB's public "123" key), so this calls a Cloudflare
+   Worker proxy that holds the key server-side — see
+   worker/rundown-proxy.js for the proxy and deploy steps.
+
+   This is purely a data-quality comparison: it logs TheRundown's
+   EPL event payload to the console alongside whatever TheSportsDB
+   returns, and touches nothing else in the app. Leave
+   RUNDOWN_PROXY_BASE empty to keep this a no-op.
+   ============================================================ */
+const RUNDOWN_PROXY_BASE = 'https://team-dashboard-rundown-proxy.boxscore.workers.dev';
+const RUNDOWN_EPL_SPORT_ID = 11;
+
+async function fetchRundownComparison(){
+  if(!RUNDOWN_PROXY_BASE) return;
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    const data = await fetchJSON(`${RUNDOWN_PROXY_BASE}/events/${RUNDOWN_EPL_SPORT_ID}/${today}`);
+    console.log('[TheRundown comparison] EPL events for', today, data);
+  } catch(err) {
+    console.warn('[TheRundown comparison] fetch failed', err);
+  }
+}
+
 // Bump this on every deploy that changes what's on screen. It's shown
 // in the corner of the app (see #build-tag in index.html) so you can
 // confirm a device is actually running the latest build rather than
@@ -778,6 +805,7 @@ if(buildTagEl) buildTagEl.textContent = APP_VERSION;
 renderBoard();
 backgroundRefreshTick();
 setInterval(backgroundRefreshTick, REFRESH_STEP_MS);
+fetchRundownComparison();
 
 if('serviceWorker' in navigator){
   window.addEventListener('load', () => {
