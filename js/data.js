@@ -276,15 +276,19 @@ const LEAGUE_SCORING = {
     name: 'EPL',
     full: 'Premier League Scoring',
     accent: '#3D195B',
+    // rankAuto rules are derived automatically from the live standings
+    // table (see getEplRuleTeams in app.js) rather than marked by hand.
+    // exclusive rules can only ever be true for one team at a time —
+    // marking a new team for them replaces whoever was marked before.
     rules: [
-      { label: 'Win League Cup', pts: 1 },
-      { label: 'Win FA Cup', pts: 2 },
+      { label: 'Win League Cup', pts: 1, exclusive: true },
+      { label: 'Win FA Cup', pts: 2, exclusive: true },
       { label: 'Make Europa League', pts: 3 },
       { label: 'Make Champions League (any stage)', pts: 4 },
-      { label: '3rd in EPL', pts: 3 },
-      { label: '2nd in EPL', pts: 6 },
-      { label: 'Win EPL', pts: 9 },
-      { label: 'Relegation', pts: -5 }
+      { label: '3rd in EPL', pts: 3, rankAuto: { rank: 3 } },
+      { label: '2nd in EPL', pts: 6, rankAuto: { rank: 2 } },
+      { label: 'Win EPL', pts: 9, rankAuto: { rank: 1 } },
+      { label: 'Relegation', pts: -5, rankAuto: { bottom: 3 } }
     ],
     bonus: { label: 'Highest combined win-loss-draw point total across your teams', pts: 5 }
   },

@@ -10,28 +10,34 @@
    ============================================================ */
 const API_BASE = 'https://www.thesportsdb.com/api/v1/json/123/';
 const ACHIEVEMENTS_KEY = 'teamDashboardAchievements';
+const LEAGUE_FACTS_KEY = 'teamDashboardLeagueFacts';
+const EPL_FACTS_MIGRATED_KEY = 'teamDashboardEplFactsMigrated';
 
 /* ============================================================
-   COMPARISON PROTOTYPE: TheRundown (EPL only, console-only)
+   DASHBOARD WORKER: shared Cloudflare Worker — see
+   worker/rundown-proxy.js for the two things it does:
 
-   TheRundown's API key can't be embedded in client JS (unlike
-   TheSportsDB's public "123" key), so this calls a Cloudflare
-   Worker proxy that holds the key server-side — see
-   worker/rundown-proxy.js for the proxy and deploy steps.
+   1. Proxies a handful of TheRundown requests (its API key can't be
+      embedded in client JS the way TheSportsDB's public test key
+      can). Used here purely for a console-only data-quality
+      comparison against TheSportsDB — touches nothing else in the
+      app.
+   2. Stores the League Facts data (see below) in Workers KV so a
+      mark made by one drafter is visible to everyone, instead of
+      sitting in just their own browser's localStorage.
 
-   This is purely a data-quality comparison: it logs TheRundown's
-   EPL event payload to the console alongside whatever TheSportsDB
-   returns, and touches nothing else in the app. Leave
-   RUNDOWN_PROXY_BASE empty to keep this a no-op.
+   Leave DASHBOARD_WORKER_BASE empty to turn both off — the Rundown
+   comparison becomes a no-op and League Facts falls back to
+   localStorage-only (not shared, but still functional).
    ============================================================ */
-const RUNDOWN_PROXY_BASE = 'https://team-dashboard-rundown-proxy.boxscore.workers.dev';
+const DASHBOARD_WORKER_BASE = 'https://team-dashboard-rundown-proxy.boxscore.workers.dev';
 const RUNDOWN_EPL_SPORT_ID = 11;
 
 async function fetchRundownComparison(){
-  if(!RUNDOWN_PROXY_BASE) return;
+  if(!DASHBOARD_WORKER_BASE) return;
   try {
     const today = new Date().toISOString().slice(0, 10);
-    const data = await fetchJSON(`${RUNDOWN_PROXY_BASE}/events/${RUNDOWN_EPL_SPORT_ID}/${today}`);
+    const data = await fetchJSON(`${DASHBOARD_WORKER_BASE}/events/${RUNDOWN_EPL_SPORT_ID}/${today}`);
     console.log('[TheRundown comparison] EPL events for', today, data);
   } catch(err) {
     console.warn('[TheRundown comparison] fetch failed', err);
@@ -43,7 +49,7 @@ async function fetchRundownComparison(){
 // confirm a device is actually running the latest build rather than
 // a stale cached copy — compare what's on screen to the version
 // mentioned when a change ships.
-const APP_VERSION = '2026.09.10-3';
+const APP_VERSION = '2026.09.10-6';
 
 // ---- Draft team selection ----
 // Which drafter's roster is currently shown on the Board/Standings
@@ -176,7 +182,11 @@ function openLeagueModal(leagueKey){
     </div>
   ` : '';
 
-  document.getElementById('modal-content').innerHTML = `
+  const modalContent = document.getElementById('modal-content');
+  modalContent.dataset.activeTeam = '';
+  modalContent.dataset.activeLeagueResults = '';
+
+  modalContent.innerHTML = `
     <div class="modal-accent" style="background:${data.accent};"></div>
     <div class="modal-head">
       <div>
@@ -218,6 +228,178 @@ function isAchieved(teamKey, label){
   return !!(all[teamKey] && all[teamKey].includes(label));
 }
 
+// ---- League Facts (EPL) ----
+// EPL has moved off the per-team checklist above: instead of marking
+// "Relegation" on Liverpool's own tracker, you mark the real-world fact
+// once — "who got relegated" — from the Results modal, and every
+// drafter who owns one of those clubs is credited automatically. Rank
+// rules (rankAuto in LEAGUE_SCORING.epl) skip marking entirely and are
+// read straight off the live standings table once it loads.
+//
+// Manually-marked facts are shared across everyone looking at the
+// dashboard, not just saved in your own browser — they're held in
+// Workers KV behind the same Cloudflare Worker used for the TheRundown
+// comparison (see DASHBOARD_WORKER_BASE / worker/rundown-proxy.js).
+// localStorage (LEAGUE_FACTS_KEY) is kept alongside as a fallback: it's
+// what renders instantly before the network responds, and what's used
+// if DASHBOARD_WORKER_BASE is empty or unreachable.
+//
+// Storage shape: { [ruleLabel]: [teamKey, ...] } — only 'epl' uses this;
+// every other league still uses the per-team ACHIEVEMENTS_KEY checklist
+// below.
+
+const eplFactsCache = { data: null, loading: false, error: false };
+
+function loadLocalEplFacts(){
+  try {
+    const parsed = JSON.parse(localStorage.getItem(LEAGUE_FACTS_KEY));
+    if(!parsed) return {};
+    // Earlier versions of this feature stored { epl: {...} } (facts
+    // nested per league, in case other leagues moved to this model
+    // too). Unwrap that shape if we find it; otherwise this is already
+    // the flat rule-map saveLocalEplFacts writes today.
+    return (parsed.epl && typeof parsed.epl === 'object') ? parsed.epl : parsed;
+  } catch (e){
+    return {};
+  }
+}
+
+function saveLocalEplFacts(epl){
+  try {
+    localStorage.setItem(LEAGUE_FACTS_KEY, JSON.stringify(epl));
+  } catch (e){
+    // localStorage unavailable (private browsing, etc.) — facts just won't persist locally.
+  }
+}
+
+// Synchronous read used everywhere the app needs "what's marked right
+// now": the shared copy once it's loaded, the local fallback until
+// then. Kicks off the network fetch on first read, same lazy-load
+// pattern as fetchEplStandingsTable.
+function currentEplFacts(){
+  if(eplFactsCache.data === null && !eplFactsCache.loading && !eplFactsCache.error) fetchEplFacts();
+  return eplFactsCache.data || loadLocalEplFacts();
+}
+
+async function fetchEplFacts(){
+  if(eplFactsCache.data !== null || eplFactsCache.loading || !DASHBOARD_WORKER_BASE) return;
+  eplFactsCache.loading = true;
+  const data = await fetchJSON(`${DASHBOARD_WORKER_BASE}/facts/epl`);
+  eplFactsCache.loading = false;
+  // If a mark was made locally while this was in flight, eplFactsCache.data
+  // is no longer null — don't clobber that edit with the (now stale) GET.
+  if(eplFactsCache.data !== null) return;
+  if(data && typeof data === 'object'){
+    eplFactsCache.data = data;
+    renderStandings();
+    renderEplResultsModal();
+  } else {
+    eplFactsCache.error = true;
+  }
+}
+
+// Pushes the current facts to both the local fallback and the shared
+// store. The PUT is fire-and-forget — if it fails (offline, worker
+// down) the mark still sticks locally, it just won't show up for
+// anyone else until the next successful sync.
+function persistEplFacts(epl){
+  saveLocalEplFacts(epl);
+  if(!DASHBOARD_WORKER_BASE) return;
+  fetch(`${DASHBOARD_WORKER_BASE}/facts/epl`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(epl)
+  }).catch(err => console.warn('[League Facts] failed to sync to shared store', err));
+}
+
+// One-time migration so anyone who'd already ticked EPL boxes under the
+// old per-team checklist doesn't see their marks vanish. Safe to run
+// every load — it no-ops once EPL_FACTS_MIGRATED_KEY is set. Only
+// touches the local fallback; if this browser ever calls
+// addEplLeagueFact/removeEplLeagueFact afterward, that push syncs
+// these forward to the shared store like any other edit.
+function migrateEplAchievementsToFacts(){
+  try {
+    if(localStorage.getItem(EPL_FACTS_MIGRATED_KEY)) return;
+  } catch (e){ return; }
+
+  const oldData = loadAchievements();
+  const epl = loadLocalEplFacts();
+
+  Object.keys(oldData).forEach(teamKey => {
+    const meta = TEAM_META[teamKey];
+    if(!meta || meta.leagueKey !== 'epl') return;
+    (oldData[teamKey] || []).forEach(label => {
+      const list = epl[label] || (epl[label] = []);
+      if(!list.includes(teamKey)) list.push(teamKey);
+    });
+  });
+
+  saveLocalEplFacts(epl);
+  try { localStorage.setItem(EPL_FACTS_MIGRATED_KEY, '1'); } catch (e){}
+}
+
+function findEplRule(ruleLabel){
+  return LEAGUE_SCORING.epl.rules.find(r => r.label === ruleLabel);
+}
+
+// Teams currently satisfying an EPL rule — auto-derived from the live
+// table for rankAuto rules, or read from the manually-marked facts
+// otherwise.
+function getEplRuleTeams(rule){
+  if(rule.rankAuto){
+    const table = eplStandingsCache.table;
+    if(!table) return [];
+    const total = table.length;
+    return table
+      .filter(row => {
+        const rank = parseInt(row.intRank, 10);
+        return rule.rankAuto.bottom ? rank > total - rule.rankAuto.bottom : rank === rule.rankAuto.rank;
+      })
+      .map(row => findDraftedTeamByName('epl', row.strTeam))
+      .filter(Boolean);
+  }
+  return currentEplFacts()[rule.label] || [];
+}
+
+function addEplLeagueFact(ruleLabel, teamKey){
+  const rule = findEplRule(ruleLabel);
+  if(!rule || rule.rankAuto || !teamKey) return;
+
+  const epl = eplFactsCache.data || (eplFactsCache.data = currentEplFacts());
+  if(rule.exclusive){
+    epl[ruleLabel] = [teamKey];
+  } else {
+    const list = epl[ruleLabel] || (epl[ruleLabel] = []);
+    if(!list.includes(teamKey)) list.push(teamKey);
+  }
+  persistEplFacts(epl);
+  renderEplResultsModal();
+}
+
+function removeEplLeagueFact(ruleLabel, teamKey){
+  const epl = eplFactsCache.data || (eplFactsCache.data = currentEplFacts());
+  const list = epl[ruleLabel] || [];
+  const idx = list.indexOf(teamKey);
+  if(idx === -1) return;
+  list.splice(idx, 1);
+  persistEplFacts(epl);
+  renderEplResultsModal();
+}
+
+// Refreshes the rows inside the Results modal in place, if it's the
+// thing currently open — mirrors renderTrackerSection's guard so a
+// stray fact edit can't repaint over whatever the user has since
+// navigated to.
+function renderEplResultsModal(){
+  const modalContent = document.getElementById('modal-content');
+  if(!modalContent || modalContent.dataset.activeLeagueResults !== 'epl') return;
+  const league = LEAGUES.find(l => l.key === 'epl');
+  const rowsHtml = LEAGUE_SCORING.epl.rules.map(r => leagueFactRowHtml(league, r)).join('');
+  const list = modalContent.querySelector('.league-facts-list');
+  if(list) list.innerHTML = rowsHtml;
+}
+
 function toggleAchievementByIndex(teamKey, ruleIndex){
   const meta = TEAM_META[teamKey];
   const scoring = meta && LEAGUE_SCORING[meta.leagueKey];
@@ -240,6 +422,9 @@ function computeTeamPoints(teamKey){
   const meta = TEAM_META[teamKey];
   const scoring = meta && LEAGUE_SCORING[meta.leagueKey];
   if(!scoring) return 0;
+  if(meta.leagueKey === 'epl'){
+    return scoring.rules.reduce((sum, r) => sum + (getEplRuleTeams(r).includes(teamKey) ? r.pts : 0), 0);
+  }
   const achieved = loadAchievements()[teamKey] || [];
   return scoring.rules.reduce((sum, r) => sum + (achieved.includes(r.label) ? r.pts : 0), 0);
 }
@@ -250,6 +435,30 @@ function trackerSectionHtml(teamKey){
   if(!scoring) return '';
 
   const total = computeTeamPoints(teamKey);
+
+  // EPL achievements are marked from the Standings tab now (see League
+  // Facts panel), not per-team — this is a read-only summary of where
+  // things stand.
+  if(meta.leagueKey === 'epl'){
+    const itemsHtml = scoring.rules.map(r => {
+      const achieved = getEplRuleTeams(r).includes(teamKey);
+      return `
+        <div class="tracker-item readonly ${achieved ? 'achieved' : ''}">
+          <div class="tracker-check">${achieved ? CHECK_ICON_SVG : ''}</div>
+          <div class="tracker-label">${r.label}</div>
+          <div class="tracker-value ${r.pts >= 0 ? 'pos' : 'neg'}">${r.pts >= 0 ? '+' : ''}${r.pts} pt${Math.abs(r.pts) === 1 ? '' : 's'}</div>
+        </div>
+      `;
+    }).join('');
+
+    return `
+      <div class="modal-section-title">Track This Season</div>
+      <div class="tracker-total">Earned so far: <b>${total >= 0 ? '+' : ''}${total}</b> pt${Math.abs(total) === 1 ? '' : 's'}</div>
+      <div class="tracker-list">${itemsHtml}</div>
+      <button class="tracker-manage-link" onclick="openEplResultsModal();">Marked from Results &rarr;</button>
+    `;
+  }
+
   const itemsHtml = scoring.rules.map((r, i) => {
     const achieved = isAchieved(teamKey, r.label);
     return `
@@ -419,15 +628,91 @@ function eplStandingsToggleHtml(){
 }
 
 function leagueBlockHtml(league, bodyHtml){
+  const resultsChipHtml = league.key === 'epl'
+    ? `<div class="scoring-chip" onclick="openEplResultsModal()">Results</div>`
+    : '';
+
   return `
     <div class="league">
       <div class="league-tab">
-        <div class="league-tab-left">${league.label} <div class="scoring-chip" onclick="openLeagueModal('${league.key}')">Scoring</div></div>
+        <div class="league-tab-left">${league.label} <div class="scoring-chip" onclick="openLeagueModal('${league.key}')">Scoring</div>${resultsChipHtml}</div>
         <span class="n">${league.season}</span>
       </div>
       ${bodyHtml}
     </div>
   `;
+}
+
+// One place to mark league-wide facts (cup winners, who got relegated,
+// etc.) instead of hunting down each drafted team individually — pick
+// the real club from the dropdown and whoever drafted it gets credited.
+// Rank-based rules (rankAuto) show a "Live" tag instead of a picker
+// since they're read straight off the standings table above. Lives in
+// its own modal (the "Results" chip) rather than inline on Standings.
+function leagueFactRowHtml(league, rule){
+  const selected = getEplRuleTeams(rule);
+  const isAuto = !!rule.rankAuto;
+
+  const chipsHtml = selected.length
+    ? selected.map(teamKey => {
+        const meta = TEAM_META[teamKey];
+        const drafter = DRAFT_TEAMS.find(d => d.id === meta.draftTeamId);
+        const removeBtn = isAuto ? '' : `<button class="fact-chip-x" onclick="removeEplLeagueFact('${rule.label}', '${teamKey}')" aria-label="Remove ${meta.name}">&times;</button>`;
+        return `
+          <span class="fact-chip">
+            <span class="fact-chip-badge" style="${meta.badgeStyle}">${meta.badgeText}</span>
+            ${meta.name} <span class="fact-chip-owner">${drafter.name}</span>
+            ${removeBtn}
+          </span>
+        `;
+      }).join('')
+    : `<span class="fact-empty">${isAuto ? 'Pending' : 'Not marked yet'}</span>`;
+
+  const pickerHtml = isAuto ? '' : `
+    <select class="fact-picker" onchange="if(this.value){ addEplLeagueFact('${rule.label}', this.value); this.value=''; }">
+      <option value="">+ Mark a team…</option>
+      ${league.teams.map(teamKey => `<option value="${teamKey}">${TEAM_META[teamKey].name} — ${DRAFT_TEAMS.find(d => d.id === TEAM_META[teamKey].draftTeamId).name}</option>`).join('')}
+    </select>
+  `;
+
+  return `
+    <div class="fact-row">
+      <div class="fact-row-top">
+        <div class="fact-label">${rule.label}</div>
+        ${isAuto ? '<div class="fact-auto-tag">Live</div>' : ''}
+        <div class="fact-pts ${rule.pts >= 0 ? 'pos' : 'neg'}">${rule.pts >= 0 ? '+' : ''}${rule.pts}</div>
+      </div>
+      <div class="fact-chips">${chipsHtml}</div>
+      ${pickerHtml}
+    </div>
+  `;
+}
+
+function openEplResultsModal(){
+  const league = LEAGUES.find(l => l.key === 'epl');
+  const data = LEAGUE_SCORING.epl;
+  const rowsHtml = data.rules.map(r => leagueFactRowHtml(league, r)).join('');
+
+  const modalContent = document.getElementById('modal-content');
+  modalContent.dataset.activeTeam = '';
+  modalContent.dataset.activeLeagueResults = 'epl';
+
+  modalContent.innerHTML = `
+    <div class="modal-accent" style="background:${data.accent};"></div>
+    <div class="modal-head">
+      <div>
+        <h2>${data.name} Results</h2>
+        <div class="modal-sub">Mark who won what — credit flows to whoever drafted them</div>
+      </div>
+      <button class="modal-close" onclick="closeTeamModal()">${CLOSE_ICON_SVG}</button>
+    </div>
+    <div class="modal-body" style="padding-top: 18px;">
+      <div class="league-facts-list">${rowsHtml}</div>
+    </div>
+  `;
+
+  document.getElementById('modal-overlay').classList.add('open');
+  lockBodyScroll();
 }
 
 function renderStandings(){
@@ -439,19 +724,20 @@ function renderStandings(){
       return leagueBlockHtml(league, `<div class="no-live-note">No data available.</div>`);
     }
 
+    let bodyHtml;
     if(eplStandingsCache.table){
       const rowsHtml = eplStandingsMode === 'byDrafter'
         ? computeEplDrafterCombined().map((row, i) => renderEplByDrafterRow(row, i + 1)).join('')
         : eplStandingsCache.table.map(row => renderStandingsRow('epl', row)).join('');
-      return leagueBlockHtml(league, eplStandingsToggleHtml() + rowsHtml);
+      bodyHtml = eplStandingsToggleHtml() + rowsHtml;
+    } else if(eplStandingsCache.error){
+      bodyHtml = `<div class="no-live-note">No data available.</div>`;
+    } else {
+      fetchEplStandingsTable();
+      bodyHtml = `<div class="loading-note">Loading standings…</div>`;
     }
 
-    if(eplStandingsCache.error){
-      return leagueBlockHtml(league, `<div class="no-live-note">No data available.</div>`);
-    }
-
-    fetchEplStandingsTable();
-    return leagueBlockHtml(league, `<div class="loading-note">Loading standings…</div>`);
+    return leagueBlockHtml(league, bodyHtml);
   }).join('');
 
   container.innerHTML = `<div class="standings-grid">${blocksHtml}</div>`;
@@ -719,6 +1005,7 @@ function openTeamModal(teamKey){
 
   const modalContent = document.getElementById('modal-content');
   modalContent.dataset.activeTeam = teamKey;
+  modalContent.dataset.activeLeagueResults = '';
 
   const hasLive = !!meta.sportsdbId;
   const cached = hasLive ? liveDataCache[teamKey] : null;
@@ -760,7 +1047,9 @@ function openTeamModal(teamKey){
 
 function closeTeamModal(){
   document.getElementById('modal-overlay').classList.remove('open');
-  document.getElementById('modal-content').dataset.activeTeam = '';
+  const modalContent = document.getElementById('modal-content');
+  modalContent.dataset.activeTeam = '';
+  modalContent.dataset.activeLeagueResults = '';
   unlockBodyScroll();
 }
 
@@ -802,6 +1091,7 @@ async function backgroundRefreshTick(){
 const buildTagEl = document.getElementById('build-tag');
 if(buildTagEl) buildTagEl.textContent = APP_VERSION;
 
+migrateEplAchievementsToFacts();
 renderBoard();
 backgroundRefreshTick();
 setInterval(backgroundRefreshTick, REFRESH_STEP_MS);
