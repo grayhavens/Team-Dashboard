@@ -21,6 +21,12 @@
   --draw-soft: rgba(184,163,105,0.16);
   --live: #E5484D;
   --live-soft: rgba(229,72,77,0.16);
+  --provisional: #7C9CD9;
+  --provisional-soft: rgba(124,156,217,0.16);
+  --provisional-border: rgba(124,156,217,0.38);
+  --record: #9AA5B5;
+  --record-soft: rgba(154,165,181,0.16);
+  --record-border: rgba(154,165,181,0.38);
   --badge-surface: #E9E6DE;
   --nav-h: 74px;
 }
@@ -700,15 +706,15 @@ body{
    these read straight off today's table and can still change before
    the season ends. */
 .tracker-item.provisional .tracker-check{
-  background: var(--accent);
+  background: var(--provisional);
   border-color: transparent;
 }
 
 .tracker-item.provisional .tracker-label{ color: var(--text); }
 
 .tracker-item.provisional .tracker-value{
-  background: var(--accent-soft);
-  color: var(--accent);
+  background: var(--provisional-soft);
+  color: var(--provisional);
   border-color: transparent;
 }
 
@@ -720,9 +726,9 @@ body{
   font-weight: 700;
   letter-spacing: 0.4px;
   text-transform: uppercase;
-  color: var(--accent);
-  background: var(--accent-soft);
-  border: 1px solid var(--accent-border);
+  color: var(--provisional);
+  background: var(--provisional-soft);
+  border: 1px solid var(--provisional-border);
   border-radius: 20px;
   padding: 2px 6px;
   vertical-align: middle;
@@ -732,8 +738,8 @@ body{
   display: inline-block;
   margin-left: 10px;
   padding-left: 10px;
-  border-left: 1px solid var(--accent-border);
-  color: var(--accent);
+  border-left: 1px solid var(--provisional-border);
+  color: var(--provisional);
   font-weight: 600;
 }
 
@@ -981,6 +987,23 @@ body{
   color: var(--text-mute);
 }
 
+/* Person view's real W-D-L record chip — its own color (not the gold
+   used by the League view's "drafted by" chip below, or the "Person"
+   toggle) so all three don't read as the same signal. */
+.person-record-chip{
+  margin-left: auto;
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1px;
+  white-space: nowrap;
+  padding: 4px 10px;
+  border-radius: 999px;
+  color: var(--record);
+  background: var(--record-soft);
+  border: 1px solid var(--record-border);
+}
+
 .drafted-by-chip{
   margin-left: auto;
   flex: 0 0 auto;
@@ -1078,7 +1101,7 @@ body{
   width: 5px;
   height: 5px;
   border-radius: 999px;
-  background: var(--accent);
+  background: var(--provisional);
   margin-right: 4px;
   vertical-align: middle;
 }
@@ -1088,7 +1111,7 @@ body{
   width: 6px;
   height: 6px;
   border-radius: 999px;
-  background: var(--accent);
+  background: var(--provisional);
   margin-right: 5px;
   vertical-align: middle;
 }

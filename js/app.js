@@ -112,7 +112,7 @@ async function fetchRundownEventForTeam(meta){
 // confirm a device is actually running the latest build rather than
 // a stale cached copy — compare what's on screen to the version
 // mentioned when a change ships.
-const APP_VERSION = '2026.09.10-21';
+const APP_VERSION = '2026.09.10-26';
 
 // ---- Draft team selection ----
 // Which drafter's roster is currently shown on the Board/Standings
@@ -799,7 +799,7 @@ function renderEplByDrafterRow(row, rank){
         <div class="team-name">${row.name}${leaderTagHtml}</div>
         <div class="team-sub">${teamsLabel}${note ? ' &middot; ' + note : ''}</div>
       </div>
-      <div class="drafted-by-chip">${row.found > 0 ? `${row.win}-${row.draw}-${row.loss} &middot; ${row.points} pts` : '&mdash;'}</div>
+      <div class="person-record-chip">${row.found > 0 ? `${row.win}-${row.draw}-${row.loss} &middot; ${row.points} pts` : '&mdash;'}</div>
     </div>
   `;
 }
@@ -1101,6 +1101,42 @@ async function fetchSportsDbV2Schedule(kind, id){
   return { results: list, events: list };
 }
 
+// ---- Team info: a separate, much slower-refreshing cache ----
+// Of the 3 SportsDB calls a team used to make every single refresh
+// tick, "team info" (sport, founded year, stadium, colors, badge) is
+// essentially static — it doesn't change mid-season, unlike a team's
+// last result or next fixture. Pulling it out of the per-tick fetch
+// and caching it for a full day (persisted, so a fresh page load
+// doesn't even need to re-fetch it) cuts a third of the per-team call
+// volume with no real freshness cost. Same TTL-cache shape as
+// eplStandingsCache/rundownDayCache elsewhere in this file.
+const TEAM_INFO_CACHE_KEY = 'teamDashboardTeamInfoCache';
+const TEAM_INFO_TTL_MS = 24 * 60 * 60 * 1000;
+const teamInfoCache = {}; // teamKey -> { info, fetchedAt }
+
+function saveTeamInfoCache(){
+  try { localStorage.setItem(TEAM_INFO_CACHE_KEY, JSON.stringify(teamInfoCache)); } catch (e){}
+}
+
+function loadTeamInfoCache(){
+  try {
+    const raw = localStorage.getItem(TEAM_INFO_CACHE_KEY);
+    if(!raw) return;
+    const parsed = JSON.parse(raw);
+    for(const teamKey of Object.keys(parsed)) teamInfoCache[teamKey] = parsed[teamKey];
+  } catch (e){}
+}
+
+async function fetchTeamInfoCached(teamKey, id, useV2){
+  const cached = teamInfoCache[teamKey];
+  if(cached && (Date.now() - cached.fetchedAt) < TEAM_INFO_TTL_MS) return cached.info;
+
+  const info = useV2 ? await fetchSportsDbV2Team(id) : await fetchJSON(`${API_BASE}lookupteam.php?id=${id}`);
+  teamInfoCache[teamKey] = { info, fetchedAt: Date.now() };
+  saveTeamInfoCache();
+  return info;
+}
+
 async function fetchTeamBundle(teamKey){
   const meta = TEAM_META[teamKey];
   if(!meta || (!meta.sportsdbId && !meta.rundownTeamId)) return null;
@@ -1115,9 +1151,11 @@ async function fetchTeamBundle(teamKey){
     // fetchEplStandingsTable) rather than each team fetching and
     // storing its own copy of the same league table — renderStats
     // reads eplStandingsCache.table directly, so nothing from that
-    // fetch needs to end up in this team's own bundle.
+    // fetch needs to end up in this team's own bundle. Team info is
+    // similarly decoupled — see fetchTeamInfoCached — since it's the
+    // one piece of this bundle that's effectively static.
     const [info, last, next, , rundownEvent] = await Promise.all([
-      useV2 ? fetchSportsDbV2Team(id) : fetchJSON(`${API_BASE}lookupteam.php?id=${id}`),
+      fetchTeamInfoCached(teamKey, id, useV2),
       useV2 ? fetchSportsDbV2Schedule('schedule-previous', id) : fetchJSON(`${API_BASE}eventslast.php?id=${id}`),
       useV2 ? fetchSportsDbV2Schedule('schedule-next', id) : fetchJSON(`${API_BASE}eventsnext.php?id=${id}`),
       meta.leagueId ? fetchEplStandingsTable() : Promise.resolve(null),
@@ -1445,18 +1483,45 @@ document.addEventListener('keydown', (e) => {
 });
 
 /* ---- Staggered background refresh ----
-   Refreshing all 21 live teams at once every few minutes would
-   burst 50-70 requests in a single second. Instead we refresh one
-   team at a time on a rotating schedule, so the whole board cycles
-   through a refresh roughly every 15 minutes while only ever
-   sending a handful of requests per minute. Every tick also paints
-   that team's board-row pill (last result / today's fixture) from
-   the same fetch — no extra requests are made for that. If a
-   team's modal happens to be open when its turn comes up, it
-   updates live and the "Last updated" time ticks forward right in
-   front of you. */
+   Refreshing every live team at once would burst way too many
+   requests into a single second. Instead we refresh one team at a
+   time on a rotating schedule, spread evenly across a full cycle, so
+   sending is smoothed out to a handful of requests per minute rather
+   than a spike. Every tick also paints that team's board-row pill
+   (last result / today's fixture) from the same fetch — no extra
+   requests for that. If a team's modal happens to be open when its
+   turn comes up, it updates live and the "Last updated" time ticks
+   forward right in front of you.
+
+   The cycle length (how often any given team refreshes) is dynamic,
+   not a fixed number — it's derived from how many teams are actually
+   live and TheSportsDB's premium rate limit, so it stays safe as more
+   leagues get wired up over time instead of needing to be manually
+   retuned:
+     - Each tick costs SPORTSDB_CALLS_PER_TEAM_TICK calls (last result
+       + next fixture — team info is on its own day-long cache, see
+       fetchTeamInfoCached, and standings are a shared 15-min cache,
+       see fetchEplStandingsTable, so neither adds meaningfully here).
+     - We budget up to SPORTSDB_RATE_BUDGET_PER_MIN of the real
+       100/min premium ceiling for this steady loop, leaving the rest
+       as headroom for those occasional extra calls.
+     - The cycle never goes faster than MIN_REFRESH_CYCLE_MS even if
+       the budget would allow it — there's no real benefit to
+       refreshing scores more often than that for a casual dashboard.
+   At today's team count this comes out to the 5-minute floor with
+   plenty of budget to spare; the formula only stretches the cycle out
+   once there are enough teams that 5 minutes would actually risk the
+   rate limit — worked out around 225 teams at 2 calls/tick, comfortably
+   past even a fully-wired 210-team roster. */
+const SPORTSDB_CALLS_PER_TEAM_TICK = 2;
+const SPORTSDB_RATE_BUDGET_PER_MIN = 90;
+const MIN_REFRESH_CYCLE_MS = 5 * 60 * 1000;
+
 const LIVE_TEAM_KEYS = Object.keys(TEAM_META).filter(k => TEAM_META[k].sportsdbId || TEAM_META[k].rundownTeamId);
-const REFRESH_CYCLE_MS = 15 * 60 * 1000;
+const REFRESH_CYCLE_MS = Math.max(
+  MIN_REFRESH_CYCLE_MS,
+  (LIVE_TEAM_KEYS.length * SPORTSDB_CALLS_PER_TEAM_TICK / SPORTSDB_RATE_BUDGET_PER_MIN) * 60 * 1000
+);
 const REFRESH_STEP_MS = LIVE_TEAM_KEYS.length ? REFRESH_CYCLE_MS / LIVE_TEAM_KEYS.length : REFRESH_CYCLE_MS;
 let refreshCursor = 0;
 
@@ -1481,6 +1546,7 @@ if(buildTagEl) buildTagEl.textContent = APP_VERSION;
 migrateEplAchievementsToFacts();
 loadLiveDataCache();
 loadEplStandingsCache();
+loadTeamInfoCache();
 renderBoard();
 
 // Paint every team's row-status pill from whatever's cached (possibly
