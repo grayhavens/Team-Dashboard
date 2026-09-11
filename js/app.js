@@ -112,7 +112,7 @@ async function fetchRundownEventForTeam(meta){
 // confirm a device is actually running the latest build rather than
 // a stale cached copy — compare what's on screen to the version
 // mentioned when a change ships.
-const APP_VERSION = '2026.09.11-1';
+const APP_VERSION = '2026.09.11-2';
 
 // ---- Draft team selection ----
 // Which drafter's roster is currently shown on the Board/Standings
@@ -668,6 +668,15 @@ function findDraftedTeamByName(leagueKey, realName){
   }) || null;
 }
 
+// Same idea as findDraftedTeamByName, but for upstream data keyed by
+// TheRundown's numeric team_id (e.g. the CFB ranking table) rather than
+// a free-text team name — an exact id match, no normalization needed.
+function findDraftedTeamByRundownId(leagueKey, rundownTeamId){
+  const league = LEAGUES.find(l => l.key === leagueKey);
+  if(!league || !rundownTeamId) return null;
+  return league.teams.find(teamKey => TEAM_META[teamKey].rundownTeamId === rundownTeamId) || null;
+}
+
 function abbrFromName(name){
   const words = (name || '').trim().split(/\s+/).filter(Boolean);
   if(words.length >= 2) return words.map(w => w[0]).join('').toUpperCase().slice(0, 4);
@@ -898,6 +907,64 @@ function fetchCfbRecords(){
   return cfbRecordsPromise;
 }
 
+// ---- CFB Ranking: the real AP/CFP-style Top 25 ----
+// TheSportsDB has no poll/ranking data at all, but TheRundown's
+// /sports/{sportId}/teams response — the exact same payload already
+// fetched above for win-loss records — carries a "ranking" field per
+// team (1-25 for the current Top 25, absent entirely for every
+// unranked team). No extra request needed: this just reads a field
+// cfbRecordsCache.byTeamId was already discarding.
+function computeCfbRankingTable(){
+  const byTeamId = cfbRecordsCache.byTeamId || {};
+  return Object.values(byTeamId)
+    .filter(t => typeof t.ranking === 'number' && t.ranking >= 1 && t.ranking <= 25)
+    .sort((a, b) => a.ranking - b.ranking);
+}
+
+function renderCfbRankingRow(team){
+  const teamKey = findDraftedTeamByRundownId('cfb', team.team_id);
+  const meta = teamKey ? TEAM_META[teamKey] : {
+    name: team.name,
+    badgeStyle: 'background: rgba(255,255,255,0.08); color: var(--text-sub); border-color: var(--hairline-strong);',
+    badgeText: abbrFromName(team.name),
+    badgeUrl: null
+  };
+  const draftedByHtml = teamKey
+    ? `<div class="drafted-by-chip">${DRAFT_TEAMS.find(d => d.id === meta.draftTeamId).name}</div>`
+    : '';
+
+  return `
+    <div class="standings-row ${teamKey ? 'clickable' : ''}" ${teamKey ? `onclick="openTeamModal('${teamKey}')"` : ''}>
+      <div class="standings-rank">${team.ranking}</div>
+      ${teamBadgeHtml(meta)}
+      <div class="team-main">
+        <div class="team-name">${meta.name}</div>
+        <div class="team-sub">${team.record || ''}</div>
+      </div>
+      ${draftedByHtml}
+    </div>
+  `;
+}
+
+// Toggle between the real national Top 25 and each drafter's combined
+// record — same idea as eplStandingsMode above. Defaults to "ranking"
+// since that's the real external data, matching EPL's "table" default.
+let cfbStandingsMode = 'ranking';
+
+function setCfbStandingsMode(mode){
+  cfbStandingsMode = mode;
+  renderStandings();
+}
+
+function cfbStandingsToggleHtml(){
+  return `
+    <div class="standings-toggle">
+      <button class="toggle-btn ${cfbStandingsMode === 'ranking' ? 'active' : ''}" onclick="setCfbStandingsMode('ranking')">Ranking</button>
+      <button class="toggle-btn ${cfbStandingsMode === 'byDrafter' ? 'active' : ''}" onclick="setCfbStandingsMode('byDrafter')">Person</button>
+    </div>
+  `;
+}
+
 // Combined win percentage across each drafter's 3 CFB teams — matches
 // LEAGUE_SCORING.cfb.bonus ("Best combined win percentage") exactly, so
 // whoever's #1 here is also who's currently on track for that bonus.
@@ -1101,7 +1168,16 @@ function renderStandings(){
     if(league.key === 'cfb'){
       let bodyHtml;
       if(cfbRecordsCache.byTeamId){
-        bodyHtml = computeCfbDrafterCombined().map((row, i) => renderCfbByDrafterRow(row, i + 1)).join('');
+        let rowsHtml;
+        if(cfbStandingsMode === 'byDrafter'){
+          rowsHtml = computeCfbDrafterCombined().map((row, i) => renderCfbByDrafterRow(row, i + 1)).join('');
+        } else {
+          const rankingRows = computeCfbRankingTable();
+          rowsHtml = rankingRows.length
+            ? rankingRows.map(team => renderCfbRankingRow(team)).join('')
+            : `<div class="no-live-note">No teams currently ranked.</div>`;
+        }
+        bodyHtml = cfbStandingsToggleHtml() + rowsHtml;
         fetchCfbRecords(); // no-op if already fresh; quietly refreshes in the background if stale
       } else if(cfbRecordsCache.error){
         bodyHtml = `<div class="no-live-note">No data available.</div>`;
