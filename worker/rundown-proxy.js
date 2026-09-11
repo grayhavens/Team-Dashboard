@@ -67,18 +67,28 @@ const SPORTSDB_V1_BASE = 'https://www.thesportsdb.com/api/v1/json';
 // and is harmless in production — it just lets a local `python -m
 // http.server` load this worker too.
 const ALLOWED_ORIGINS = [
-  'https://grayhavens.github.io',
+  'https://boxscorethedraft.pages.dev',
   'http://localhost:8934'
 ];
+
+// Cloudflare Pages also serves every branch/preview deploy from its own
+// throwaway subdomain (e.g. https://<hash>.boxscorethedraft.pages.dev) —
+// match those too so preview deployments aren't broken by CORS.
+const ALLOWED_ORIGIN_SUFFIX = '.boxscorethedraft.pages.dev';
 
 // League keys that are allowed to have a facts blob — mirrors the
 // leagueKey values in js/data.js. Keeping an allowlist here (rather
 // than accepting any string) keeps the KV keyspace bounded.
 const KNOWN_LEAGUES = ['epl', 'nfl', 'nba', 'nhl', 'mlb', 'wnba', 'cfb', 'mcbb'];
 
+function isAllowedOrigin(origin){
+  return ALLOWED_ORIGINS.includes(origin) ||
+    (origin.startsWith('https://') && origin.endsWith(ALLOWED_ORIGIN_SUFFIX));
+}
+
 function corsHeaders(origin){
   return {
-    'Access-Control-Allow-Origin': ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0],
+    'Access-Control-Allow-Origin': isAllowedOrigin(origin) ? origin : ALLOWED_ORIGINS[0],
     'Access-Control-Allow-Methods': 'GET, PUT, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
     'Vary': 'Origin'
