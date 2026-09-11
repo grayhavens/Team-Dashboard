@@ -206,6 +206,17 @@ body{
   gap: 8px;
 }
 
+/* Scoring + Results grouped together so space-between above only
+   splits "chips" from "season" — without this wrapper, a league with
+   both chips gave space-between three items to spread out, which
+   pushed Results away from Scoring into the middle of the row instead
+   of keeping the two chips together on the left. */
+.league-tab-chips-left{
+  display:flex;
+  align-items:center;
+  gap: 8px;
+}
+
 /* Teams-tab header layout: title with the season directly beneath it
    on the left (wraps onto a second line for the longer league names,
    e.g. "National Football League"), the Upcoming/Last Result column

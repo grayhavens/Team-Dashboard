@@ -260,8 +260,10 @@ function leagueBlockHtml(league, bodyHtml){
           <div class="league-tab-left">${headerLabel}</div>
         </div>
         <div class="league-tab-chips">
-          <div class="scoring-chip" onclick="openLeagueModal('${league.key}')">Scoring</div>
-          ${resultsChipHtml}
+          <div class="league-tab-chips-left">
+            <div class="scoring-chip" onclick="openLeagueModal('${league.key}')">Scoring</div>
+            ${resultsChipHtml}
+          </div>
           <span class="n">${league.season}</span>
         </div>
       </div>
