@@ -49,6 +49,29 @@ async function fetchEspnJSON(path){
   }
 }
 
+// Both endpoints below carry a team.logos[] array — used for teams
+// this app doesn't have its own (SportsDB-sourced) badge for, i.e. a
+// ranked/standings team nobody's drafted. Picks the entry tagged
+// ["full","default"] (a transparent PNG, same shape as this app's
+// existing SportsDB crests — see teamBadgeHtml in js/utils.js), falling
+// back to whatever's first if that exact tag is ever missing.
+function espnLogoUrl(team){
+  if(!team || !Array.isArray(team.logos) || !team.logos.length) return null;
+  const preferred = team.logos.find(l => Array.isArray(l.rel) && l.rel.includes('default'));
+  return (preferred || team.logos[0]).href || null;
+}
+
+// team.displayName is usually "Location Name" (e.g. "Ohio State
+// Buckeyes") pre-joined, but it's not reliable — confirmed live,
+// ESPN's CFB rankings return `"displayName": null` for Alabama
+// specifically (location/name are both fine: "Alabama"/"Crimson
+// Tide"), so this rebuilds it from the parts rather than trusting the
+// joined field outright.
+function espnTeamName(team){
+  if(!team) return '';
+  return team.displayName || `${team.location || ''} ${team.name || ''}`.trim() || team.location || '';
+}
+
 // CONFERENCE-level standings only (32 teams split AFC/NFC) — verified
 // live against actual results (e.g. Seattle showed 1-0/Rams 0-1
 // immediately after their Week 1 final, while teams that hadn't
@@ -74,8 +97,8 @@ async function fetchEspnJSON(path){
 // build than this flat conference endpoint, so it's left unimplemented
 // here pending a decision on whether it's worth it over Phase 2's
 // simpler "conference-only, drop the division grouping" option.
-// Shape returned: [{ conference, teamName, abbreviation, wins,
-// losses, ties, streak, pointsFor, pointsAgainst, winPercent }]
+// Shape returned: [{ conference, conferenceAbbr, teamName, abbreviation,
+// logoUrl, wins, losses, ties, streak, pointsFor, pointsAgainst, winPercent }]
 export async function fetchEspnNflStandings(){
   const data = await fetchEspnJSON('/apis/v2/sports/football/nfl/standings');
   if(!data || !Array.isArray(data.children)) return null;
@@ -90,8 +113,10 @@ export async function fetchEspnNflStandings(){
       };
       rows.push({
         conference: conf.name,
-        teamName: entry.team.displayName,
+        conferenceAbbr: conf.abbreviation,
+        teamName: espnTeamName(entry.team),
         abbreviation: entry.team.abbreviation,
+        logoUrl: espnLogoUrl(entry.team),
         wins: stat('wins'),
         losses: stat('losses'),
         ties: stat('ties'),
@@ -110,7 +135,7 @@ export async function fetchEspnNflStandings(){
 // array). Richer than TheRundown's flat 1-25 "ranking" field: also
 // carries week-over-week trend, first-place votes, and poll points.
 // Shape returned: [{ rank, previousRank, trend, teamName, location,
-// record, points, firstPlaceVotes }]
+// logoUrl, record, points, firstPlaceVotes }]
 export async function fetchEspnCfbRankings(pollName = 'AP Top 25'){
   const data = await fetchEspnJSON('/apis/site/v2/sports/football/college-football/rankings');
   if(!data || !Array.isArray(data.rankings)) return null;
@@ -122,8 +147,9 @@ export async function fetchEspnCfbRankings(pollName = 'AP Top 25'){
     rank: r.current,
     previousRank: r.previous,
     trend: r.trend,
-    teamName: r.team.displayName,
+    teamName: espnTeamName(r.team),
     location: r.team.location,
+    logoUrl: espnLogoUrl(r.team),
     record: r.recordSummary,
     points: r.points,
     firstPlaceVotes: r.firstPlaceVotes

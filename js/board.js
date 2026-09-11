@@ -23,8 +23,9 @@ import {
 } from './standings-cfb.js';
 import {
   nflRecordsCache, nflStandingsMode, computeNflDrafterCombined, renderNflByDrafterRow,
-  computeNflDivisionStandings, renderNflStandingsRow, renderNflGroupHeader, nflStandingsToggleHtml,
-  fetchNflRecords, loadNflRecordsCache, renderAllNflCardRecords
+  computeNflConferenceStandings, renderNflStandingsRow, renderNflGroupHeader, nflStandingsToggleHtml,
+  fetchNflRecords, loadNflRecordsCache, renderAllNflCardRecords,
+  espnNflStandingsCache, fetchEspnNflStandingsCached, loadEspnNflStandingsCache
 } from './standings-nfl.js';
 import { renderOverallStandings, setObMode } from './overall.js';
 import { loadLiveDataCache, loadTeamInfoCache, renderRowStatus, backgroundRefreshTick, REFRESH_STEP_MS, liveDataCache } from './live-data.js';
@@ -350,26 +351,38 @@ export function renderStandings(){
     }
 
     if(league.key === 'nfl'){
+      // Same split as CFB above: "Conference" now reads ESPN (no more
+      // TheRundown dependency, see js/standings-nfl.js's header
+      // comment), while "Person" still reads TheRundown's records — so
+      // each is gated on its own cache.
       let bodyHtml;
-      if(nflRecordsCache.byTeamId){
-        let rowsHtml;
-        if(nflStandingsMode === 'byDrafter'){
-          rowsHtml = computeNflDrafterCombined().map((row, i) => renderNflByDrafterRow(row, i + 1)).join('');
+      if(nflStandingsMode === 'byDrafter'){
+        if(nflRecordsCache.byTeamId){
+          const rowsHtml = computeNflDrafterCombined().map((row, i) => renderNflByDrafterRow(row, i + 1)).join('');
+          bodyHtml = nflStandingsToggleHtml() + rowsHtml;
+          fetchNflRecords(); // no-op if already fresh; quietly refreshes in the background if stale
+        } else if(nflRecordsCache.error){
+          bodyHtml = `<div class="no-live-note">No data available.</div>`;
         } else {
-          const conferences = computeNflDivisionStandings();
-          rowsHtml = conferences.length
-            ? conferences.map(conf => conf.divisions.map(div =>
-                renderNflGroupHeader(div.name) + div.teams.map((t, i) => renderNflStandingsRow(t, i + 1)).join('')
-              ).join('')).join('')
-            : `<div class="no-live-note">No teams currently reporting.</div>`;
+          fetchNflRecords();
+          bodyHtml = `<div class="loading-note">Loading standings…</div>`;
         }
-        bodyHtml = nflStandingsToggleHtml() + rowsHtml;
-        fetchNflRecords(); // no-op if already fresh; quietly refreshes in the background if stale
-      } else if(nflRecordsCache.error){
-        bodyHtml = `<div class="no-live-note">No data available.</div>`;
       } else {
-        fetchNflRecords();
-        bodyHtml = `<div class="loading-note">Loading standings…</div>`;
+        if(espnNflStandingsCache.rows){
+          const conferences = computeNflConferenceStandings();
+          const rowsHtml = conferences.length
+            ? conferences.map(conf =>
+                renderNflGroupHeader(conf.name) + conf.teams.map((t, i) => renderNflStandingsRow(t, i + 1)).join('')
+              ).join('')
+            : `<div class="no-live-note">No teams currently reporting.</div>`;
+          bodyHtml = nflStandingsToggleHtml() + rowsHtml;
+          fetchEspnNflStandingsCached(); // no-op if already fresh; quietly refreshes in the background if stale
+        } else if(espnNflStandingsCache.error){
+          bodyHtml = `<div class="no-live-note">No data available.</div>`;
+        } else {
+          fetchEspnNflStandingsCached();
+          bodyHtml = `<div class="loading-note">Loading standings…</div>`;
+        }
       }
       return leagueBlockHtml(league, bodyHtml);
     }
@@ -405,6 +418,7 @@ loadEplStandingsCache();
 loadCfbRecordsCache();
 loadEspnCfbRankingsCache();
 loadNflRecordsCache();
+loadEspnNflStandingsCache();
 loadTeamInfoCache();
 renderBoard();
 applyUrlState();
