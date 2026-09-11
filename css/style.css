@@ -1124,35 +1124,56 @@ body{
   color: var(--accent);
 }
 
-/* -- Header stats -- */
-.ob-stats{
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+/* -- Legend -- */
+.ob-legend{ margin-bottom: 14px; }
+.ob-legend-toggle{
+  display: flex;
+  align-items: center;
   gap: 8px;
-  margin-bottom: 14px;
+  font-family: 'Manrope', sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-mute);
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  padding: 7px 12px;
+  cursor: pointer;
 }
-.ob-stat{
+.ob-legend-toggle-dots{
+  display: flex;
+  gap: 3px;
+  flex: 0 0 auto;
+}
+.ob-legend-toggle-dots span{
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.ob-legend-panel{
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin-top: 8px;
+  padding: 12px;
   background: var(--surface);
   border: 1px solid var(--hairline);
   border-radius: 12px;
-  padding: 10px 12px;
 }
-.ob-stat-num{
-  font-family: 'Space Grotesk', sans-serif;
-  font-size: 19px;
-  font-weight: 700;
-  color: var(--text);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.ob-stat-lbl{
-  font-size: 10.5px;
+.ob-legend-chip{
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
   font-weight: 600;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
-  color: var(--text-mute);
-  margin-top: 3px;
+  color: var(--text);
+}
+.ob-legend-dot{
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: 0 0 auto;
 }
 
 /* -- List -- */
@@ -1212,12 +1233,6 @@ body{
   display: flex;
 }
 .ob-mix-seg{ height: 100%; }
-.ob-mix-label{
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--text-mute);
-  white-space: nowrap;
-}
 .ob-total{
   font-family: 'Space Grotesk', sans-serif;
   font-size: 19px;
@@ -1228,6 +1243,18 @@ body{
 }
 .ob-total.neg{ color: var(--loss); }
 .ob-total.zero{ color: var(--text-mute); }
+
+@media (max-width: 480px){
+  .ob-row-head{
+    grid-template-columns: 20px minmax(0, 1fr) auto;
+    gap: 10px;
+    padding: 12px 10px;
+  }
+  .ob-rank{ font-size: 13px; }
+  .ob-name{ font-size: 16px; }
+  .ob-mix{ height: 9px; border-radius: 4px; }
+  .ob-total{ font-size: 17px; }
+}
 
 /* -- Inline expand -- */
 .ob-expand{
