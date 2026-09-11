@@ -74,8 +74,8 @@ async function fetchEspnJSON(path){
 // build than this flat conference endpoint, so it's left unimplemented
 // here pending a decision on whether it's worth it over Phase 2's
 // simpler "conference-only, drop the division grouping" option.
-// Shape returned: [{ conference, teamName, abbreviation, wins,
-// losses, ties, streak, pointsFor, pointsAgainst, winPercent }]
+// Shape returned: [{ conference, conferenceAbbr, teamName, abbreviation,
+// wins, losses, ties, streak, pointsFor, pointsAgainst, winPercent }]
 export async function fetchEspnNflStandings(){
   const data = await fetchEspnJSON('/apis/v2/sports/football/nfl/standings');
   if(!data || !Array.isArray(data.children)) return null;
@@ -90,6 +90,7 @@ export async function fetchEspnNflStandings(){
       };
       rows.push({
         conference: conf.name,
+        conferenceAbbr: conf.abbreviation,
         teamName: entry.team.displayName,
         abbreviation: entry.team.abbreviation,
         wins: stat('wins'),

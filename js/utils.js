@@ -102,15 +102,6 @@ export function findDraftedTeamByName(leagueKey, realName){
   }) || null;
 }
 
-// Same idea as findDraftedTeamByName, but for upstream data keyed by
-// TheRundown's numeric team_id (e.g. the CFB ranking table) rather than
-// a free-text team name — an exact id match, no normalization needed.
-export function findDraftedTeamByRundownId(leagueKey, rundownTeamId){
-  const league = LEAGUES.find(l => l.key === leagueKey);
-  if(!league || !rundownTeamId) return null;
-  return league.teams.find(teamKey => TEAM_META[teamKey].rundownTeamId === rundownTeamId) || null;
-}
-
 export function abbrFromName(name){
   const words = (name || '').trim().split(/\s+/).filter(Boolean);
   if(words.length >= 2) return words.map(w => w[0]).join('').toUpperCase().slice(0, 4);

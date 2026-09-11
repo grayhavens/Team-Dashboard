@@ -1,23 +1,32 @@
 /* ============================================================
-   NFL Standings: real division/conference standings, plus each
-   drafter's combined win percentage across their 3 NFL teams.
+   NFL Standings: real conference standings, plus each drafter's
+   combined win percentage across their 3 NFL teams.
    Like CFB, TheSportsDB's lookuptable.php returns genuinely empty for
    the NFL's league id (4391) across every season tested, current and
    historical (confirmed 2026-09-11) — so there's no real per-club
    table to pull from TheSportsDB here either.
 
-   TheRundown's per-sport team list (the same endpoint CFB's
-   fetchCfbRecords already uses) carries a "record" field for the NFL
-   too, plus something CFB's response doesn't have: real conference and
-   division objects per team ("AFC North", "NFC West", etc.) — enough
-   to build actual division standings without a second data source.
-   One shared fetch for the whole league (mirrors cfbRecordsCache/
-   eplStandingsCache: one call, not one per team), reusing the existing
-   /teams/{sportId} worker route.
+   TheRundown's per-sport team list still backs per-team records (card
+   records below, and the "Person" combined-win% view) — unchanged.
+
+   The Conference standings view itself (below, computeNflConferenceStandings/
+   renderNflStandingsRow) has moved OFF TheRundown and onto ESPN's hidden
+   API (js/espn.js) instead — see docs/espn-migration-plan.md's Phase 3,
+   same reasoning as CFB's AP Top 25 move in Phase 2: no shared metered
+   budget to run out, no worker proxy needed (CORS-open, fetched
+   directly). ESPN's simple standings endpoint only nests one level
+   (conference — AFC/NFC, 16 teams each), NOT division — true
+   division-by-division grouping (what this view showed before, via
+   TheRundown's division field) needs a much heavier hypermedia fetch
+   chain that wasn't worth building for this phase (see the plan doc's
+   "NFL division standings" finding). So this is a deliberate step DOWN
+   in grouping granularity in exchange for a data source that won't run
+   out mid-week — re-evaluate if that trade stops feeling worth it.
    ============================================================ */
 import { LEAGUES, TEAM_META, DRAFT_TEAMS, LEAGUE_SCORING } from './data.js';
-import { fetchJSON, findDraftedTeamByRundownId, teamBadgeHtml, abbrFromName } from './utils.js';
+import { fetchJSON, teamBadgeHtml, abbrFromName } from './utils.js';
 import { DASHBOARD_WORKER_BASE, RUNDOWN_SPORT_ID } from './api.js';
+import { fetchEspnNflStandings } from './espn.js';
 import { renderStandings } from './board.js';
 import { liveDataCache, renderStats } from './live-data.js';
 
@@ -133,62 +142,112 @@ export function renderAllNflCardRecords(){
   LEAGUES.find(l => l.key === 'nfl').teams.forEach(renderNflCardRecord);
 }
 
-// Real division standings, grouped the way the NFL itself groups them
-// (conference, then division, teams ranked by win% within it) rather
-// than one flat table — unlike EPL there's no single ranking that means
-// anything across all 32 teams. TheRundown's division.name is already
-// shaped "AFC North" / "NFC West" etc., so the conference prefix and
-// division suffix are pulled straight out of it rather than trusting
-// object key order.
-const CONFERENCE_PREFIXES = ['AFC', 'NFC'];
-const DIVISION_SUFFIXES = ['East', 'North', 'South', 'West'];
+// ---- Conference standings (ESPN-sourced — see the file header comment) ----
 
-export function computeNflDivisionStandings(){
-  const byTeamId = nflRecordsCache.byTeamId || {};
-  const groups = {}; // "AFC East" etc -> [team, ...]
-  Object.values(byTeamId).forEach(t => {
-    const divName = t.division && t.division.name;
-    if(!divName) return;
-    (groups[divName] || (groups[divName] = [])).push(t);
+const ESPN_NFL_STANDINGS_CACHE_KEY = 'teamDashboardEspnNflStandingsCache';
+// Standings can move the moment a game ends, so this stays on the same
+// cadence as nflRecordsCache below rather than CFB's poll-driven
+// once-a-week cache — matched here, not lengthened, even though it's a
+// direct unproxied fetch with no shared budget to protect.
+const ESPN_NFL_STANDINGS_TTL_MS = 60 * 60 * 1000;
+export const espnNflStandingsCache = { rows: null, error: false, loading: false, fetchedAt: null };
+let espnNflStandingsPromise = null;
+
+function espnNflStandingsIsFresh(){
+  return !!espnNflStandingsCache.rows && !!espnNflStandingsCache.fetchedAt && (Date.now() - espnNflStandingsCache.fetchedAt) < ESPN_NFL_STANDINGS_TTL_MS;
+}
+
+function saveEspnNflStandingsCache(){
+  try { localStorage.setItem(ESPN_NFL_STANDINGS_CACHE_KEY, JSON.stringify(espnNflStandingsCache)); } catch (e){}
+}
+
+export function loadEspnNflStandingsCache(){
+  try {
+    const raw = localStorage.getItem(ESPN_NFL_STANDINGS_CACHE_KEY);
+    if(!raw) return;
+    const parsed = JSON.parse(raw);
+    if(parsed && parsed.rows){
+      espnNflStandingsCache.rows = parsed.rows;
+      espnNflStandingsCache.fetchedAt = parsed.fetchedAt || null;
+    }
+  } catch (e){}
+}
+
+export function fetchEspnNflStandingsCached(){
+  if(espnNflStandingsCache.loading) return espnNflStandingsPromise;
+  if(espnNflStandingsIsFresh()) return Promise.resolve();
+
+  espnNflStandingsCache.loading = true;
+  espnNflStandingsPromise = (async () => {
+    const rows = await fetchEspnNflStandings();
+    espnNflStandingsCache.loading = false;
+    if(rows && rows.length){
+      espnNflStandingsCache.rows = rows;
+      espnNflStandingsCache.error = false;
+      espnNflStandingsCache.fetchedAt = Date.now();
+      saveEspnNflStandingsCache();
+    } else if(!espnNflStandingsCache.rows){
+      // Same "don't blank out a good cache on a transient miss" rule as
+      // nflRecordsCache/cfbRecordsCache.
+      espnNflStandingsCache.error = true;
+    }
+    renderStandings();
+  })();
+  return espnNflStandingsPromise;
+}
+
+// ESPN's abbreviation ("WSH") doesn't always match this app's own
+// badgeText ("WAS") — checked every one of the 27 currently-drafted NFL
+// teams against a live ESPN standings pull (2026-09-11): Washington is
+// the only mismatch, everything else matches verbatim. Same manual-
+// override idea as CFB_ESPN_NAME_OVERRIDES in js/standings-cfb.js.
+const NFL_ESPN_ABBR_OVERRIDES = {
+  'WSH': 'WAS'
+};
+
+function findNflTeamKeyByEspnAbbr(abbr){
+  const wanted = NFL_ESPN_ABBR_OVERRIDES[abbr] || abbr;
+  const teams = LEAGUES.find(l => l.key === 'nfl').teams;
+  return teams.find(teamKey => TEAM_META[teamKey].badgeText === wanted) || null;
+}
+
+// Conference-only grouping (AFC/NFC, 16 teams each) — see the file
+// header comment for why this isn't division-by-division. Sorted by
+// win% within each conference, ties broken by name.
+export function computeNflConferenceStandings(){
+  const rows = espnNflStandingsCache.rows || [];
+  const groups = {}; // conferenceAbbr -> [row, ...]
+  rows.forEach(row => {
+    (groups[row.conferenceAbbr] || (groups[row.conferenceAbbr] = [])).push(row);
   });
 
   Object.values(groups).forEach(list => {
     list.sort((a, b) => {
-      const pa = nflWinPct(parseNflRecord(a.record) || { wins: 0, losses: 0, ties: 0 }) ?? -1;
-      const pb = nflWinPct(parseNflRecord(b.record) || { wins: 0, losses: 0, ties: 0 }) ?? -1;
+      const pa = a.winPercent ?? -1, pb = b.winPercent ?? -1;
       if(pb !== pa) return pb - pa;
-      return a.name.localeCompare(b.name);
+      return a.teamName.localeCompare(b.teamName);
     });
   });
 
-  const conferences = [];
-  CONFERENCE_PREFIXES.forEach(prefix => {
-    const divisions = DIVISION_SUFFIXES
-      .map(suffix => `${prefix} ${suffix}`)
-      .filter(divName => groups[divName])
-      .map(divName => ({ name: divName, teams: groups[divName] }));
-    if(divisions.length) conferences.push({ name: prefix, divisions });
-  });
-  return conferences;
+  return Object.keys(groups).sort().map(abbr => ({ name: abbr, teams: groups[abbr] }));
 }
 
 export function renderNflGroupHeader(label){
   return `<div class="standings-group-header">${label}</div>`;
 }
 
-export function renderNflStandingsRow(team, rank){
-  const teamKey = findDraftedTeamByRundownId('nfl', team.team_id);
+export function renderNflStandingsRow(row, rank){
+  const teamKey = findNflTeamKeyByEspnAbbr(row.abbreviation);
   const meta = teamKey ? TEAM_META[teamKey] : {
-    name: `${team.name} ${team.mascot}`.trim(),
+    name: row.teamName,
     badgeStyle: 'background: rgba(255,255,255,0.08); color: var(--text-sub); border-color: var(--hairline-strong);',
-    badgeText: team.abbreviation || abbrFromName(team.name),
+    badgeText: row.abbreviation || abbrFromName(row.teamName),
     badgeUrl: null
   };
   const draftedByHtml = teamKey
     ? `<div class="drafted-by-chip">${DRAFT_TEAMS.find(d => d.id === meta.draftTeamId).name}</div>`
     : '';
-  const rec = parseNflRecord(team.record);
-  const recordLabel = rec ? `${rec.wins}-${rec.losses}${rec.ties ? '-' + rec.ties : ''}` : (team.record || '');
+  const recordLabel = `${row.wins}-${row.losses}${row.ties ? '-' + row.ties : ''}`;
 
   return `
     <div class="standings-row ${teamKey ? 'clickable' : ''}" ${teamKey ? `onclick="openTeamModal('${teamKey}')"` : ''}>
@@ -203,11 +262,13 @@ export function renderNflStandingsRow(team, rank){
   `;
 }
 
-// Toggle between the real division-by-division standings and each
-// drafter's combined record — same idea as eplStandingsMode/
-// cfbStandingsMode. Defaults to "division" since that's the real
-// external data, matching EPL's "table" / CFB's "ranking" default.
-export let nflStandingsMode = 'division';
+// Toggle between the real conference standings and each drafter's
+// combined record — same idea as eplStandingsMode/cfbStandingsMode.
+// Defaults to "conference" since that's the real external data,
+// matching EPL's "table" / CFB's "ranking" default. Named "conference"
+// (not the old "division") to be honest about what's actually shown —
+// see the file header comment.
+export let nflStandingsMode = 'conference';
 
 export function setNflStandingsMode(mode){
   nflStandingsMode = mode;
@@ -218,7 +279,7 @@ window.setNflStandingsMode = setNflStandingsMode;
 export function nflStandingsToggleHtml(){
   return `
     <div class="standings-toggle">
-      <button class="toggle-btn ${nflStandingsMode === 'division' ? 'active' : ''}" onclick="setNflStandingsMode('division')">Divisions</button>
+      <button class="toggle-btn ${nflStandingsMode === 'conference' ? 'active' : ''}" onclick="setNflStandingsMode('conference')">Conference</button>
       <button class="toggle-btn ${nflStandingsMode === 'byDrafter' ? 'active' : ''}" onclick="setNflStandingsMode('byDrafter')">Person</button>
     </div>
   `;
