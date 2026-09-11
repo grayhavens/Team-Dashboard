@@ -112,7 +112,7 @@ async function fetchRundownEventForTeam(meta){
 // confirm a device is actually running the latest build rather than
 // a stale cached copy — compare what's on screen to the version
 // mentioned when a change ships.
-const APP_VERSION = '2026.09.10-27';
+const APP_VERSION = '2026.09.11-1';
 
 // ---- Draft team selection ----
 // Which drafter's roster is currently shown on the Board/Standings
