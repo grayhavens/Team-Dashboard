@@ -284,7 +284,7 @@ const LEAGUE_SCORING = {
     full: 'Premier League Scoring',
     accent: '#3D195B',
     // rankAuto rules are derived automatically from the live standings
-    // table (see getEplRuleTeams in app.js) rather than marked by hand.
+    // table (see getLeagueRuleTeams in app.js) rather than marked by hand.
     // exclusive rules can only ever be true for one team at a time —
     // marking a new team for them replaces whoever was marked before.
     rules: [
