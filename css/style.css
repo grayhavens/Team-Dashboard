@@ -206,10 +206,12 @@ body{
 /* Teams-tab header layout: title with the season directly beneath it
    on the left (wraps onto a second line for the longer league names,
    e.g. "National Football League"), the Upcoming/Last Result column
-   label on its own on the right, top-aligned against the title — see
-   renderBoard in js/board.js. */
+   label on its own on the right — bottom-aligned against the season
+   line (both small/muted .n text) rather than the bold title line, so
+   it doesn't read as paired with the title despite the size/weight
+   mismatch — see renderBoard in js/board.js. */
 .league-tab.board-league-tab{
-  align-items: flex-start;
+  align-items: flex-end;
 }
 
 .board-league-tab .league-tab-left{
