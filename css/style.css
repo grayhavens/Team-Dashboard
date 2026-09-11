@@ -1046,6 +1046,23 @@ body{
   color: var(--text-mute);
 }
 
+/* NFL Standings' "Divisions" view: a small label row ("AFC North")
+   ahead of that division's 4 team rows, since — unlike EPL's single
+   table or CFB's flat Top 25 — there's no one ranking that spans all
+   32 teams. */
+.standings-group-header{
+  font-family: 'Manrope', sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  color: var(--text-mute);
+  background: rgba(255,255,255,0.02);
+  padding: 10px 18px 6px;
+}
+
+.standings-group-header + .standings-row{ border-top: none; }
+
 /* Person view's real W-D-L record chip — its own color (not the gold
    used by the League view's "drafted by" chip below, or the "Person"
    toggle) so all three don't read as the same signal. */

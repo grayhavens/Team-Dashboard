@@ -20,6 +20,11 @@ import {
   computeCfbRankingTable, renderCfbRankingRow, cfbStandingsToggleHtml, fetchCfbRecords,
   loadCfbRecordsCache, renderAllCfbCardRecords
 } from './standings-cfb.js';
+import {
+  nflRecordsCache, nflStandingsMode, computeNflDrafterCombined, renderNflByDrafterRow,
+  computeNflDivisionStandings, renderNflStandingsRow, renderNflGroupHeader, nflStandingsToggleHtml,
+  fetchNflRecords, loadNflRecordsCache, renderAllNflCardRecords
+} from './standings-nfl.js';
 import { renderOverallStandings, setObMode } from './overall.js';
 import { loadLiveDataCache, loadTeamInfoCache, renderRowStatus, backgroundRefreshTick, REFRESH_STEP_MS, liveDataCache } from './live-data.js';
 
@@ -28,7 +33,7 @@ import { loadLiveDataCache, loadTeamInfoCache, renderRowStatus, backgroundRefres
 // confirm a device is actually running the latest build rather than
 // a stale cached copy — compare what's on screen to the version
 // mentioned when a change ships.
-const APP_VERSION = '2026.09.11-3';
+const APP_VERSION = '2026.09.11-4';
 
 // ---- Bookmarkable state ----
 // Reads whatever the URL specifies at load and applies it through the
@@ -114,13 +119,16 @@ export function renderBoard(){
     const teamsHtml = leagueTeams.map(teamKey => {
       const meta = TEAM_META[teamKey];
       const cfbRecordHtml = league.key === 'cfb' ? `<span class="cfb-record" id="cfb-record-${teamKey}"></span>` : '';
+      const nflRecordHtml = league.key === 'nfl' ? `<span class="cfb-record" id="nfl-record-${teamKey}"></span>` : '';
       // EPL: every team is in the same one league, so the static
       // "Premier League" boardSub text carried no information — swap
       // it for the team's own record + table position instead (see
       // eplRecordLabel/renderEplCardRecord in js/standings-epl.js).
+      // CFB/NFL boardSub (mascot/city) is still meaningful per team, so
+      // those keep it and just append their record chip after it.
       const subHtml = league.key === 'epl'
         ? `<span class="epl-record" id="epl-record-${teamKey}"></span>`
-        : `${meta.boardSub}${cfbRecordHtml}`;
+        : `${meta.boardSub}${cfbRecordHtml}${nflRecordHtml}`;
       return `
         <div class="team clickable" onclick="openTeamModal('${teamKey}')">
           ${teamBadgeHtml(meta)}
@@ -160,6 +168,7 @@ export function renderBoard(){
   }
   renderAllCfbCardRecords();
   renderAllEplCardRecords();
+  renderAllNflCardRecords();
 }
 
 export function scrollToLeague(key){
@@ -326,6 +335,31 @@ export function renderStandings(){
       return leagueBlockHtml(league, bodyHtml);
     }
 
+    if(league.key === 'nfl'){
+      let bodyHtml;
+      if(nflRecordsCache.byTeamId){
+        let rowsHtml;
+        if(nflStandingsMode === 'byDrafter'){
+          rowsHtml = computeNflDrafterCombined().map((row, i) => renderNflByDrafterRow(row, i + 1)).join('');
+        } else {
+          const conferences = computeNflDivisionStandings();
+          rowsHtml = conferences.length
+            ? conferences.map(conf => conf.divisions.map(div =>
+                renderNflGroupHeader(div.name) + div.teams.map((t, i) => renderNflStandingsRow(t, i + 1)).join('')
+              ).join('')).join('')
+            : `<div class="no-live-note">No teams currently reporting.</div>`;
+        }
+        bodyHtml = nflStandingsToggleHtml() + rowsHtml;
+        fetchNflRecords(); // no-op if already fresh; quietly refreshes in the background if stale
+      } else if(nflRecordsCache.error){
+        bodyHtml = `<div class="no-live-note">No data available.</div>`;
+      } else {
+        fetchNflRecords();
+        bodyHtml = `<div class="loading-note">Loading standings…</div>`;
+      }
+      return leagueBlockHtml(league, bodyHtml);
+    }
+
     return leagueBlockHtml(league, `<div class="no-live-note">No data available.</div>`);
   }).join('');
 
@@ -355,19 +389,21 @@ LEAGUE_FACTS_LEAGUES.forEach(migrateAchievementsToFacts);
 loadLiveDataCache();
 loadEplStandingsCache();
 loadCfbRecordsCache();
+loadNflRecordsCache();
 loadTeamInfoCache();
 renderBoard();
 applyUrlState();
 
-// renderBoard() already repaints row-status pills and CFB/EPL record
-// chips from whatever's cached (possibly from a previous browser
-// session), so nothing sits blank waiting for its turn in the
+// renderBoard() already repaints row-status pills and CFB/EPL/NFL
+// record chips from whatever's cached (possibly from a previous
+// browser session), so nothing sits blank waiting for its turn in the
 // staggered refresh below. Still need to kick off the actual records
 // fetches here, regardless of whether the Standings tab (the only
 // other place that calls these) has been opened yet, so the board's
 // records aren't stuck waiting on that.
 fetchCfbRecords();
 fetchEplStandingsTable();
+fetchNflRecords();
 
 backgroundRefreshTick();
 setInterval(backgroundRefreshTick, REFRESH_STEP_MS);
