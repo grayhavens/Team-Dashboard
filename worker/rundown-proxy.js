@@ -176,8 +176,13 @@ async function handleRundownTeams(request, url, env, headers, ctx){
   }
 
   // /teams/{sportId} -> TheRundown's /sports/{sportId}/teams
-  // One-off/occasional use: building & spot-checking the rundownTeamId
-  // mapping in js/data.js, not called on every app load.
+  // Two uses: (1) one-off/occasional — building & spot-checking the
+  // rundownTeamId mapping in js/data.js — and (2) the CFB Standings tab
+  // (js/app.js's fetchCfbRecords), which reads the "record" field this
+  // response carries per team. TheSportsDB has no real standings data
+  // for college football (see the migration plan), so this is the
+  // actual source for that view — one shared fetch for the whole
+  // league, same as eplStandingsCache, not one call per team.
   const match = url.pathname.match(/^\/teams\/(\d+)$/);
   if(!match) return new Response('Not found', { status: 404, headers });
   const [, sportId] = match;
@@ -222,6 +227,27 @@ async function handleSportsDb(request, url, env, headers, ctx){
   // against them.
   let match;
 
+  // /sportsdb/search-team/{name} -> TheSportsDB's /search/team/{name}
+  // One-off/occasional use, same as /teams/{sportId} above: building &
+  // spot-checking the sportsdbId mapping for new teams in js/data.js
+  // (currently College Football), not called on every app load. Routed
+  // through here (premium key, its own rate limit) rather than hitting
+  // the free "123" test key directly — that key is shared globally by
+  // every developer using TheSportsDB's demo tier and gets saturated
+  // fast, confirmed 2026-09-10 while looking up CFB team IDs.
+  if((match = url.pathname.match(/^\/sportsdb\/search-team\/([^/]+)$/))){
+    return proxyToSportsDbV2(`/search/team/${match[1]}`, env, headers, CACHE_TTL_SECONDS.sportsdbTeam, ctx);
+  }
+  // /sportsdb/leagues-by-sport/{sport} -> TheSportsDB's V1
+  // search_all_leagues.php?s={sport} — one-off admin lookup, same
+  // reasoning as search-team above: used to check what leagues/
+  // divisions actually exist for a sport (e.g. whether individual CFB
+  // conferences are modeled as their own league, distinct from the
+  // umbrella "NCAA Division 1") before building any client code
+  // around an assumption about the data.
+  if((match = url.pathname.match(/^\/sportsdb\/leagues-by-sport\/([^/]+)$/))){
+    return proxyToSportsDbV1(`/search_all_leagues.php?s=${match[1]}`, env, headers, CACHE_TTL_SECONDS.sportsdbTeam, ctx);
+  }
   if((match = url.pathname.match(/^\/sportsdb\/team\/(\d+)$/))){
     return proxyToSportsDbV2(`/lookup/team/${match[1]}`, env, headers, CACHE_TTL_SECONDS.sportsdbTeam, ctx);
   }
