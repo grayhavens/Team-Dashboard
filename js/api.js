@@ -167,6 +167,14 @@ export async function fetchRundownEventForTeam(meta){
 // bug that left CFB's Last Result/Next Game blank until this migration).
 export const V2_MIGRATED_LEAGUES = ['epl', 'cfb'];
 
+// Leagues whose board row pill shows the next match ("Upcoming") instead
+// of the last result — CFB and EPL teams often sit idle between games
+// for a week or more, so the nightly-slate leagues' "last result, or
+// today's game if there is one" pill isn't as useful here as always
+// showing what's next. See renderRowStatus in js/live-data.js and the
+// "Upcoming" header label in js/board.js.
+export const UPCOMING_CHIP_LEAGUES = ['epl', 'cfb'];
+
 // V2's team-lookup response is shaped { lookup: [...] } and its
 // schedule responses are { schedule: [...] } — normalized here into
 // the { teams: [...] } / { results: [...], events: [...] } shape V1

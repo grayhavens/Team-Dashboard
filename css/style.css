@@ -183,7 +183,7 @@ body{
    is top-aligned rather than centered against however many lines that
    wraps to), and the Scoring/Results chips get their own line below
    instead of squeezing onto the same row — see leagueBlockHtml in
-   js/app.js. */
+   js/board.js. */
 .league-tab.standings-league-tab{
   flex-direction: column;
   align-items: stretch;
@@ -201,6 +201,32 @@ body{
   display:flex;
   align-items:center;
   gap: 8px;
+}
+
+/* Teams-tab header layout: title on the left (wraps onto a second
+   line for the longer league names, e.g. "Women's National Basketball
+   Association"), season + the Upcoming/Last Result column label
+   stacked top-right — kept on one row rather than the Standings tab's
+   stacked column above, so that label stays anchored right under
+   "Season" instead of dropping to its own line below a wrapped title
+   — see renderBoard in js/board.js. */
+.league-tab.board-league-tab{
+  align-items: flex-start;
+}
+
+.board-league-tab .league-tab-left{
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.league-tab-right{
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+  flex: 0 0 auto;
+  margin-left: 10px;
+  text-align: right;
 }
 
 .league-tab .n{
