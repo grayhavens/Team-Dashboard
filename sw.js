@@ -1,19 +1,26 @@
 /* Minimal service worker: keeps a copy of the static shell so the app
    still opens (from cache) when launched offline. Anything not on this
-   origin — i.e. the TheSportsDB API calls in js/app.js — is left alone
+   origin — i.e. the TheSportsDB API calls in js/live-data.js — is left alone
    and always goes straight to the network; we never cache or intercept
    those. The shell itself is network-first: every load fetches the
    latest deployed files and refreshes the cache, falling back to the
    cache only when there's no connectivity — a cache-first strategy
    here would keep serving whatever shipped the day this first
    installed, forever, since nothing else invalidates it. */
-const CACHE_NAME = 'boxscore-v3';
+const CACHE_NAME = 'boxscore-v4';
 const SHELL_FILES = [
   './',
   './index.html',
   './css/style.css',
   './js/data.js',
-  './js/app.js',
+  './js/utils.js',
+  './js/api.js',
+  './js/league-facts.js',
+  './js/standings-epl.js',
+  './js/standings-cfb.js',
+  './js/overall.js',
+  './js/live-data.js',
+  './js/board.js',
   './manifest.json',
   './icons/icon-192.png',
   './icons/icon-512.png',

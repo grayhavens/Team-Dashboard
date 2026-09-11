@@ -38,7 +38,7 @@
    EDGE CACHING — every proxied GET is cached in Workers' shared edge
    cache (caches.default), keyed on the upstream URL alone, with a TTL
    matched to how fast that data actually changes (see CACHE_TTL_SECONDS
-   below). This exists because the client-side TTLs in js/app.js only
+   below). This exists because the client-side TTLs in js/api.js and js/standings-epl.js only
    protect a single browser: with several drafters loading the dashboard
    at once (e.g. everyone checking scores during a Saturday college
    football slate), each browser was independently re-hitting TheRundown
@@ -54,7 +54,7 @@
      npx wrangler kv namespace create LEAGUE_FACTS
      (paste the printed id into wrangler.toml's kv_namespaces block)
      npx wrangler deploy
-   Then set RUNDOWN_PROXY_BASE in js/app.js to the deployed
+   Then set DASHBOARD_WORKER_BASE in js/api.js to the deployed
    *.workers.dev URL wrangler prints out.
    ============================================================ */
 
@@ -101,7 +101,7 @@ function json(data, status, headers){
       a bare fetch() — add its TTL to CACHE_TTL_SECONDS below rather
       than hardcoding a number inline. Pick that TTL to match whatever
       TTL you're also about to use client-side (see the matching
-      checklist next to RUNDOWN_CACHE_TTL_MS in js/app.js) — one
+      checklist next to RUNDOWN_CACHE_TTL_MS in js/api.js) — one
       freshness decision, not two that can quietly drift apart.
    3. Add the new league's key to KNOWN_LEAGUES only if it needs the
       League Facts feature (shared cross-viewer marks) — most new
@@ -112,10 +112,11 @@ function json(data, status, headers){
       shape before any client code gets built against it. */
 
 // How long each upstream shape is trusted in the edge cache before a
-// fresh fetch is made — matched to the client-side TTLs in js/app.js
-// (RUNDOWN_CACHE_TTL_MS, TEAM_INFO_TTL_MS, EPL_STANDINGS_TTL_MS) so this
-// layer never serves staler data than a single browser would already
-// tolerate; it only stops N browsers from each re-fetching the same
+// fresh fetch is made — matched to the client-side TTLs (RUNDOWN_CACHE_TTL_MS
+// in js/api.js, TEAM_INFO_TTL_MS in js/live-data.js, EPL_STANDINGS_TTL_MS in
+// js/standings-epl.js) so this layer never serves staler data than a single
+// browser would already tolerate; it only stops N browsers from each
+// re-fetching the same
 // thing independently.
 const CACHE_TTL_SECONDS = {
   rundownEvents: 60,           // a day's slate barely changes minute to minute
@@ -197,7 +198,7 @@ async function handleRundownTeams(request, url, env, headers, ctx){
   // /teams/{sportId} -> TheRundown's /sports/{sportId}/teams
   // Two uses: (1) one-off/occasional — building & spot-checking the
   // rundownTeamId mapping in js/data.js — and (2) the CFB Standings tab
-  // (js/app.js's fetchCfbRecords), which reads the "record" field this
+  // (js/standings-cfb.js's fetchCfbRecords), which reads the "record" field this
   // response carries per team. TheSportsDB has no real standings data
   // for college football (see the migration plan), so this is the
   // actual source for that view — one shared fetch for the whole
@@ -239,7 +240,7 @@ async function handleSportsDb(request, url, env, headers, ctx){
   }
 
   // Deliberately narrow allowlist — extend it only as new pieces of
-  // js/app.js actually need them, same discipline as the TheRundown
+  // js/api.js actually need them, same discipline as the TheRundown
   // routes above. Paths chosen from TheSportsDB's V2 docs; response
   // shapes were unverified as of writing (see the migration plan) —
   // curl these directly to confirm before building any client code

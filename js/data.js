@@ -1,12 +1,12 @@
 /* ============================================================
    Board content: leagues, teams, and scoring rules.
    This is the file to edit when adding/removing a team or league
-   — everything else in js/app.js just reads from these objects.
+   — everything else in js/ just reads from these objects.
    ============================================================ */
 
 // The 10 people in the fantasy draft. Every team in TEAM_META
 // belongs to exactly one of these via its draftTeamId field.
-const DRAFT_TEAMS = [
+export const DRAFT_TEAMS = [
   { id:'josh', name:'Josh' },
   { id:'isaac', name:'Isaac' },
   { id:'drew', name:'Drew' },
@@ -24,7 +24,7 @@ const DRAFT_TEAMS = [
 // sportsdbId: null don't have reliable live coverage yet (see
 // College Basketball below) and fall back to a plain notice.
 // rundownTeamId (TheRundown's team ID, matched against the sport_id
-// in RUNDOWN_SPORT_ID for the team's leagueKey — see js/app.js) adds
+// in RUNDOWN_SPORT_ID for the team's leagueKey — see js/api.js) adds
 // live in-game state on top of sportsdbId where present, or — for
 // College Basketball, which TheSportsDB doesn't carry — is the only
 // live source at all.
@@ -38,7 +38,7 @@ const DRAFT_TEAMS = [
 // are appended further down as a skeleton: correct name/league/owner,
 // a league-colored placeholder badge, and no live data yet. Fill
 // those in incrementally the same way EPL was done, league by league.
-const TEAM_META = {
+export const TEAM_META = {
   liverpool:  { name:'Liverpool',   leagueKey:'epl',  draftTeamId:'josh', boardSub:'Premier League', sub:"Premier League · '26/'27 Season", accent:'#C8102E', badgeStyle:'background:#C8102E; color:#F6EB61;', badgeText:'LFC',  sportsdbId:'133602', leagueId:'4328', season:'2026-2027', rundownTeamId:3446, badgeUrl:'https://r2.thesportsdb.com/images/media/team/badge/kfaher1737969724.png' },
   newcastle:  { name:'Newcastle',   leagueKey:'epl',  draftTeamId:'josh', boardSub:'Premier League', sub:"Premier League · '26/'27 Season", accent:'#241F20', badgeStyle:'background:#241F20; color:#FFFFFF;', badgeText:'NUFC', sportsdbId:'134777', leagueId:'4328', season:'2026-2027', rundownTeamId:3449, badgeUrl:'https://r2.thesportsdb.com/images/media/team/badge/lhwuiz1621593302.png' },
 
@@ -267,7 +267,7 @@ const TEAM_META = {
 // Board order: which teams appear under each league tab (across all
 // drafters — filtered down to one drafter's roster at render time),
 // and the season label shown next to the league name.
-const LEAGUES = [
+export const LEAGUES = [
   { key:'epl', label:'EPL', season:"'26/'27 Season", teams:['isaac_arsenal', 'drew_mancity', 'douglas_everton', 'collin_chelsea', 'erichylok_astonvilla', 'liverpool', 'patrick_manunited', 'peter_tottenhamhotspur', 'ericprister_crystalpalace', 'donny_brentford', 'isaac_ipswichtown', 'drew_hullcity', 'douglas_fulham', 'collin_leedsunited', 'erichylok_nottingham', 'newcastle', 'patrick_brighton', 'peter_afcbournemouth', 'ericprister_sunderland', 'donny_coventrycity'] },
   { key:'cfb', label:'College FB', season:"'26 Season", teams:['isaac_ohiostate', 'drew_georgia', 'douglas_miami', 'collin_washington', 'erichylok_usc', 'oregon', 'patrick_liberty', 'peter_texas', 'ericprister_oklahoma', 'donny_texastech', 'isaac_notredame', 'drew_pennstate', 'douglas_lsu', 'collin_toledo', 'erichylok_smu', 'texasam', 'patrick_westernmichigan', 'peter_iu', 'ericprister_jamesmadison', 'donny_newmexico', 'isaac_boisestate', 'drew_ndsu', 'douglas_houston', 'collin_olemiss', 'erichylok_byu', 'arizona', 'patrick_navy', 'peter_virginia', 'ericprister_memphis', 'donny_louisville'] },
   { key:'nfl', label:'NFL', season:"'26 Season", teams:['isaac_eagles', 'drew_chiefs', 'douglas_texans', 'collin_seahawks', 'erichylok_49ers', 'lions', 'patrick_ravens', 'peter_broncos', 'ericprister_rams', 'donny_bucs', 'isaac_patriots', 'drew_bengals', 'douglas_falcons', 'collin_giants', 'erichylok_packers', 'steelers', 'patrick_colts', 'peter_jaguars', 'ericprister_bills', 'donny_vikings', 'isaac_titans', 'drew_bears', 'douglas_commanders', 'collin_raiders', 'erichylok_cowboys', 'dolphins', 'patrick_saints', 'peter_panthers', 'ericprister_chargers', 'donny_jets'] },
@@ -278,13 +278,13 @@ const LEAGUES = [
   { key:'wnba', label:'WNBA', season:"'27 Season", teams:['isaac_mercury', 'drew_sky', 'douglas_lynx', 'collin_dream', 'erichylok_liberty', 'valkyries', 'patrick_wings', 'peter_aces', 'ericprister_mystics', 'donny_fever'] }
 ];
 
-const LEAGUE_SCORING = {
+export const LEAGUE_SCORING = {
   epl: {
     name: 'EPL',
     full: 'Premier League Scoring',
     accent: '#3D195B',
     // rankAuto rules are derived automatically from the live standings
-    // table (see getLeagueRuleTeams in app.js) rather than marked by hand.
+    // table (see getLeagueRuleTeams in js/league-facts.js) rather than marked by hand.
     // exclusive rules can only ever be true for one team at a time —
     // marking a new team for them replaces whoever was marked before.
     rules: [
