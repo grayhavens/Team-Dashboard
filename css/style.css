@@ -203,30 +203,20 @@ body{
   gap: 8px;
 }
 
-/* Teams-tab header layout: title on the left (wraps onto a second
-   line for the longer league names, e.g. "Women's National Basketball
-   Association"), season + the Upcoming/Last Result column label
-   stacked top-right — kept on one row rather than the Standings tab's
-   stacked column above, so that label stays anchored right under
-   "Season" instead of dropping to its own line below a wrapped title
-   — see renderBoard in js/board.js. */
+/* Teams-tab header layout: title with the season directly beneath it
+   on the left (wraps onto a second line for the longer league names,
+   e.g. "National Football League"), the Upcoming/Last Result column
+   label on its own on the right, top-aligned against the title — see
+   renderBoard in js/board.js. */
 .league-tab.board-league-tab{
   align-items: flex-start;
 }
 
 .board-league-tab .league-tab-left{
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-.league-tab-right{
-  display: flex;
   flex-direction: column;
-  align-items: flex-end;
-  gap: 3px;
-  flex: 0 0 auto;
-  margin-left: 10px;
-  text-align: right;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
 }
 
 .league-tab .n{

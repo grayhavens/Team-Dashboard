@@ -136,11 +136,11 @@ export function renderBoard(){
     return `
       <div class="league" id="league-${league.key}">
         <div class="league-tab board-league-tab">
-          <div class="league-tab-left">${LEAGUE_FULL_LABELS[league.key] || league.label}</div>
-          <div class="league-tab-right">
+          <div class="league-tab-left">
+            <div>${LEAGUE_FULL_LABELS[league.key] || league.label}</div>
             <span class="n">${league.season}</span>
-            <span class="n">${UPCOMING_CHIP_LEAGUES.includes(league.key) ? 'Upcoming' : 'Last Result'}</span>
           </div>
+          <span class="n">${UPCOMING_CHIP_LEAGUES.includes(league.key) ? 'Upcoming' : 'Last Result'}</span>
         </div>
         ${teamsHtml}
       </div>
@@ -224,12 +224,7 @@ window.openLeagueModal = openLeagueModal;
 const LEAGUE_FULL_LABELS = {
   epl: 'English Premier League',
   cfb: 'College Football',
-  nfl: 'National Football League',
-  mcbb: 'College Basketball',
-  nba: 'National Basketball Association',
-  nhl: 'National Hockey League',
-  mlb: 'Major League Baseball',
-  wnba: "Women's National Basketball Association"
+  mcbb: "Men's College Basketball"
 };
 
 // Shortened further still for the filter chip row only — the Teams
