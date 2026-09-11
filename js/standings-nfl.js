@@ -162,31 +162,20 @@ export function findEspnNflRow(meta){
   return rows.find(row => (NFL_ESPN_ABBR_OVERRIDES[row.abbreviation] || row.abbreviation) === meta.badgeText) || null;
 }
 
-// Conference-wide ranking (AFC/NFC, 16 teams each) — distinct from the
-// Division view below: division winners and conference-best-record are
-// two separate scoring bonuses (see LEAGUE_SCORING.nfl), so a team can
+// One conference's full 16-team ranking — distinct from the Division
+// breakdown below: division winner and best-record-in-conference are
+// two different scoring bonuses (see LEAGUE_SCORING.nfl), so a team can
 // be worth tracking in one view without leading the other. Reads the
 // same cheap flat espnNflStandingsCache the "Person" view already uses
 // (conference is a field right there on each row), so this costs
 // nothing extra over what's already fetched — no separate cache needed.
-export function computeNflConferenceStandings(){
-  const rows = espnNflStandingsCache.rows || [];
-  const groups = {}; // conferenceAbbr -> [row, ...]
-  rows.forEach(row => {
-    (groups[row.conferenceAbbr] || (groups[row.conferenceAbbr] = [])).push(row);
+export function computeNflConferenceStandings(conferenceAbbr){
+  const rows = (espnNflStandingsCache.rows || []).filter(row => row.conferenceAbbr === conferenceAbbr);
+  return rows.sort((a, b) => {
+    const pa = a.winPercent ?? -1, pb = b.winPercent ?? -1;
+    if(pb !== pa) return pb - pa;
+    return a.teamName.localeCompare(b.teamName);
   });
-
-  Object.values(groups).forEach(list => {
-    list.sort((a, b) => {
-      const pa = a.winPercent ?? -1, pb = b.winPercent ?? -1;
-      if(pb !== pa) return pb - pa;
-      return a.teamName.localeCompare(b.teamName);
-    });
-  });
-
-  // AFC before NFC, matching the Division view's own ordering
-  // (alphabetical sort already gives this order).
-  return Object.keys(groups).sort().map(abbr => ({ name: abbr, teams: groups[abbr] }));
 }
 
 // ---- Division standings (the heavier ESPN fetch — see the file header comment) ----
@@ -246,16 +235,21 @@ export function fetchEspnNflDivisionStandingsCached(){
 // East/North/South/West, NFC East/North/South/West) — this just sorts
 // each division's 4 teams by win%, ties broken by name, same rule the
 // old conference-only version used.
-export function computeNflDivisionStandings(){
+// conferenceAbbr ('AFC'/'NFC') narrows to that conference's 4
+// divisions — division names are "AFC East" etc, so a simple prefix
+// match does it, no separate conference field needed on each division.
+export function computeNflDivisionStandings(conferenceAbbr){
   const divisions = espnNflDivisionCache.divisions || [];
-  return divisions.map(d => ({
-    name: d.division,
-    teams: [...d.teams].sort((a, b) => {
-      const pa = a.winPercent ?? -1, pb = b.winPercent ?? -1;
-      if(pb !== pa) return pb - pa;
-      return a.teamName.localeCompare(b.teamName);
-    })
-  }));
+  return divisions
+    .filter(d => d.division.startsWith(conferenceAbbr))
+    .map(d => ({
+      name: d.division,
+      teams: [...d.teams].sort((a, b) => {
+        const pa = a.winPercent ?? -1, pb = b.winPercent ?? -1;
+        if(pb !== pa) return pb - pa;
+        return a.teamName.localeCompare(b.teamName);
+      })
+    }));
 }
 
 export function renderNflGroupHeader(label){
@@ -291,15 +285,18 @@ export function renderNflStandingsRow(row, rank){
   `;
 }
 
-// Three-way toggle: real division standings, real conference-wide
-// ranking, and each drafter's combined record — same idea as
-// eplStandingsMode/cfbStandingsMode, just a third option since NFL has
-// two separate real groupings worth tracking (not just one, like EPL's
-// table or CFB's Top 25) — division winner and best-record-in-conference
-// are two different scoring bonuses (LEAGUE_SCORING.nfl). Defaults to
-// "division" since that's the richer/more real external data, matching
-// EPL's "table" / CFB's "ranking" default.
-export let nflStandingsMode = 'division';
+// Nested toggle, two rows: which conference (AFC/NFC — plus "Person",
+// which isn't conference-scoped) on top, then — only when a conference
+// is selected — Divisions vs. the conference's Full 16-team ranking
+// underneath. Replaces a single flat Divisions/Conference/Person switch
+// that always showed 32 or 16 teams at once; picking a conference first
+// halves that immediately, and Divisions-within-a-conference halves it
+// again (4 teams per group instead of 8 groups of 4 all at once).
+// Division winner and best-record-in-conference are two different
+// scoring bonuses (LEAGUE_SCORING.nfl), so both stay real options, not
+// just one flattened into the other.
+export let nflStandingsMode = 'afc'; // 'afc' | 'nfc' | 'byDrafter'
+export let nflConferenceSubMode = 'division'; // 'division' | 'full' — only meaningful when nflStandingsMode is 'afc'/'nfc'
 
 export function setNflStandingsMode(mode){
   nflStandingsMode = mode;
@@ -307,14 +304,29 @@ export function setNflStandingsMode(mode){
 }
 window.setNflStandingsMode = setNflStandingsMode;
 
+export function setNflConferenceSubMode(subMode){
+  nflConferenceSubMode = subMode;
+  renderStandings();
+}
+window.setNflConferenceSubMode = setNflConferenceSubMode;
+
 export function nflStandingsToggleHtml(){
-  return `
+  const topRow = `
     <div class="standings-toggle">
-      <button class="toggle-btn ${nflStandingsMode === 'division' ? 'active' : ''}" onclick="setNflStandingsMode('division')">Divisions</button>
-      <button class="toggle-btn ${nflStandingsMode === 'conference' ? 'active' : ''}" onclick="setNflStandingsMode('conference')">Conference</button>
+      <button class="toggle-btn ${nflStandingsMode === 'afc' ? 'active' : ''}" onclick="setNflStandingsMode('afc')">AFC</button>
+      <button class="toggle-btn ${nflStandingsMode === 'nfc' ? 'active' : ''}" onclick="setNflStandingsMode('nfc')">NFC</button>
       <button class="toggle-btn ${nflStandingsMode === 'byDrafter' ? 'active' : ''}" onclick="setNflStandingsMode('byDrafter')">Person</button>
     </div>
   `;
+  if(nflStandingsMode === 'byDrafter') return topRow;
+
+  const subRow = `
+    <div class="standings-toggle standings-subtoggle">
+      <button class="toggle-btn ${nflConferenceSubMode === 'division' ? 'active' : ''}" onclick="setNflConferenceSubMode('division')">Divisions</button>
+      <button class="toggle-btn ${nflConferenceSubMode === 'full' ? 'active' : ''}" onclick="setNflConferenceSubMode('full')">Conference</button>
+    </div>
+  `;
+  return topRow + subRow;
 }
 
 // Combined win percentage across each drafter's 3 NFL teams — matches

@@ -22,7 +22,7 @@ import {
   espnCfbRankingsCache, fetchEspnCfbRankingsCached, loadEspnCfbRankingsCache
 } from './standings-cfb.js';
 import {
-  nflStandingsMode, computeNflDrafterCombined, renderNflByDrafterRow,
+  nflStandingsMode, nflConferenceSubMode, computeNflDrafterCombined, renderNflByDrafterRow,
   computeNflDivisionStandings, computeNflConferenceStandings, renderNflStandingsRow, renderNflGroupHeader,
   nflStandingsToggleHtml, renderAllNflCardRecords, espnNflStandingsCache, fetchEspnNflStandingsCached,
   loadEspnNflStandingsCache, espnNflDivisionCache, fetchEspnNflDivisionStandingsCached, loadEspnNflDivisionCache
@@ -351,17 +351,20 @@ export function renderStandings(){
     }
 
     if(league.key === 'nfl'){
-      // "Divisions" reads the much heavier espnNflDivisionCache (9
-      // requests instead of 1); "Conference" and "Person" both just
-      // need a team's own record with no per-division grouping, so
-      // they share the cheap flat espnNflStandingsCache — unlike CFB
-      // where the split is about TheRundown vs ESPN, this split is
-      // about which ESPN cache is cheap enough for the job. See
-      // js/standings-nfl.js's header comment.
+      // Nested: pick AFC/NFC/Person first, then (for AFC/NFC) Divisions
+      // vs. that conference's Full ranking — see js/standings-nfl.js's
+      // header comment. "Divisions" reads the much heavier
+      // espnNflDivisionCache (9 requests instead of 1); "Full
+      // Conference" and "Person" both just need a team's own record
+      // with no per-division grouping, so they share the cheap flat
+      // espnNflStandingsCache — this split is about which ESPN cache is
+      // cheap enough for the job, same idea as before, just nested now.
+      const usesDivisionCache = nflStandingsMode !== 'byDrafter' && nflConferenceSubMode === 'division';
       let bodyHtml;
-      if(nflStandingsMode === 'division'){
+      if(usesDivisionCache){
+        const conferenceAbbr = nflStandingsMode.toUpperCase();
         if(espnNflDivisionCache.divisions){
-          const divisions = computeNflDivisionStandings();
+          const divisions = computeNflDivisionStandings(conferenceAbbr);
           const rowsHtml = divisions.length
             ? divisions.map(div =>
                 renderNflGroupHeader(div.name) + div.teams.map((t, i) => renderNflStandingsRow(t, i + 1)).join('')
@@ -381,10 +384,11 @@ export function renderStandings(){
           if(nflStandingsMode === 'byDrafter'){
             rowsHtml = computeNflDrafterCombined().map((row, i) => renderNflByDrafterRow(row, i + 1)).join('');
           } else {
-            const conferences = computeNflConferenceStandings();
-            rowsHtml = conferences.map(conf =>
-              renderNflGroupHeader(conf.name) + conf.teams.map((t, i) => renderNflStandingsRow(t, i + 1)).join('')
-            ).join('');
+            const conferenceAbbr = nflStandingsMode.toUpperCase();
+            const teams = computeNflConferenceStandings(conferenceAbbr);
+            rowsHtml = teams.length
+              ? teams.map((t, i) => renderNflStandingsRow(t, i + 1)).join('')
+              : `<div class="no-live-note">No teams currently reporting.</div>`;
           }
           bodyHtml = nflStandingsToggleHtml() + rowsHtml;
           fetchEspnNflStandingsCached(); // no-op if already fresh; quietly refreshes in the background if stale

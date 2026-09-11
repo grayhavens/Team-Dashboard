@@ -992,6 +992,14 @@ body{
   border-bottom: 1px solid var(--hairline);
 }
 
+/* NFL's second toggle row (Divisions/Full Conference), stacked right
+   under the first (AFC/NFC/Person) — pulled closer so the pair reads as
+   one nested choice ("which conference, then how to view it") instead
+   of two unrelated toggle bars. */
+.standings-subtoggle{
+  padding-top: 0;
+}
+
 .toggle-btn{
   flex: 1;
   font-family: 'Manrope', sans-serif;
