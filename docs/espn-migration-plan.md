@@ -51,7 +51,7 @@ scope for this evaluation and still working.
 Base host: `https://site.web.api.espn.com` (not the older `site.api.espn.com` — confirmed the two
 hosts return byte-identical data for shared paths during this session, so use `.web.` going forward).
 
-| Endpoint | Status | CORS (`Origin: https://grayhavens.github.io`) | Notes |
+| Endpoint | Status | CORS (`Origin: https://boxscorethedraft.pages.dev`) | Notes |
 |---|---|---|---|
 | `/apis/v2/sports/football/nfl/standings` | ✅ Real, live-accurate | ✅ `access-control-allow-origin: *` | **Conference-level only** — see correction below |
 | `/apis/site/v2/sports/football/college-football/rankings` | ✅ Real, rich | ✅ open | 5 polls (AP, Coaches, FCS Coaches, D2/D3 Coaches); rank/prev/trend/points/firstPlaceVotes/record all present |
