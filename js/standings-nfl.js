@@ -6,68 +6,31 @@
    historical (confirmed 2026-09-11) — so there's no real per-club
    table to pull from TheSportsDB here either.
 
-   TheRundown's per-sport team list still backs per-team records (card
-   records below, and the "Person" combined-win% view) — unchanged.
+   Both views here (Conference standings AND the "Person" combined-win%
+   breakdown) read ESPN's hidden API (js/espn.js) — see
+   docs/espn-migration-plan.md's Phase 3. TheRundown's per-sport team
+   list used to back all of this (records, division, the works) but is
+   fully retired from this file now: unlike CFB (whose ESPN rankings
+   endpoint only covers the Top 25 — not enough for a full-roster
+   combined-win% view, so CFB's "Person" tab stays on TheRundown),
+   ESPN's NFL standings endpoint already covers all 32 teams, so there
+   was no coverage gap keeping any part of this file on the metered
+   source. No worker proxy needed either (CORS-open, fetched directly).
 
-   The Conference standings view itself (below, computeNflConferenceStandings/
-   renderNflStandingsRow) has moved OFF TheRundown and onto ESPN's hidden
-   API (js/espn.js) instead — see docs/espn-migration-plan.md's Phase 3,
-   same reasoning as CFB's AP Top 25 move in Phase 2: no shared metered
-   budget to run out, no worker proxy needed (CORS-open, fetched
-   directly). ESPN's simple standings endpoint only nests one level
-   (conference — AFC/NFC, 16 teams each), NOT division — true
-   division-by-division grouping (what this view showed before, via
-   TheRundown's division field) needs a much heavier hypermedia fetch
-   chain that wasn't worth building for this phase (see the plan doc's
-   "NFL division standings" finding). So this is a deliberate step DOWN
-   in grouping granularity in exchange for a data source that won't run
-   out mid-week — re-evaluate if that trade stops feeling worth it.
+   One real trade made along the way: ESPN's simple standings endpoint
+   only nests one level (conference — AFC/NFC, 16 teams each), NOT
+   division — true division-by-division grouping (what the old
+   TheRundown-backed version showed) needs a much heavier hypermedia
+   fetch chain that wasn't worth building for this phase (see the plan
+   doc's "NFL division standings" finding). So this is a deliberate step
+   DOWN in grouping granularity in exchange for a data source that won't
+   run out mid-week — re-evaluate if that trade stops feeling worth it.
    ============================================================ */
 import { LEAGUES, TEAM_META, DRAFT_TEAMS, LEAGUE_SCORING } from './data.js';
-import { fetchJSON, teamBadgeHtml, abbrFromName } from './utils.js';
-import { DASHBOARD_WORKER_BASE, RUNDOWN_SPORT_ID } from './api.js';
+import { teamBadgeHtml, abbrFromName } from './utils.js';
 import { fetchEspnNflStandings } from './espn.js';
 import { renderStandings } from './board.js';
 import { liveDataCache, renderStats } from './live-data.js';
-
-const NFL_RECORDS_CACHE_KEY = 'teamDashboardNflRecordsCache';
-// A team's record only changes after that team's own game (once a
-// week, same cadence as CFB) — matches cfbRecordsCache's hour-long TTL,
-// and the worker's own CACHE_TTL_SECONDS.rundownTeams, so both layers
-// agree on freshness.
-const NFL_RECORDS_TTL_MS = 60 * 60 * 1000;
-export const nflRecordsCache = { byTeamId: null, error: false, loading: false, fetchedAt: null };
-let nflRecordsPromise = null;
-
-export function nflRecordsIsFresh(){
-  return !!nflRecordsCache.byTeamId && !!nflRecordsCache.fetchedAt && (Date.now() - nflRecordsCache.fetchedAt) < NFL_RECORDS_TTL_MS;
-}
-
-function saveNflRecordsCache(){
-  try { localStorage.setItem(NFL_RECORDS_CACHE_KEY, JSON.stringify(nflRecordsCache)); } catch (e){}
-}
-
-export function loadNflRecordsCache(){
-  try {
-    const raw = localStorage.getItem(NFL_RECORDS_CACHE_KEY);
-    if(!raw) return;
-    const parsed = JSON.parse(raw);
-    if(parsed && parsed.byTeamId){
-      nflRecordsCache.byTeamId = parsed.byTeamId;
-      nflRecordsCache.fetchedAt = parsed.fetchedAt || null;
-    }
-  } catch (e){}
-}
-
-// "8-8-1" -> {wins:8, losses:8, ties:1}; "8-8" -> {wins:8, losses:8, ties:0}.
-// Unlike CFB (no ties possible since 1996), the NFL can still end a
-// game tied, so the third segment is read when present rather than
-// assumed away — parseWinLossRecord in js/standings-cfb.js is the
-// two-part version of this same idea.
-export function parseNflRecord(record){
-  const m = /^(\d+)-(\d+)(?:-(\d+))?/.exec(record || '');
-  return m ? { wins: parseInt(m[1], 10), losses: parseInt(m[2], 10), ties: parseInt(m[3] || '0', 10) } : null;
-}
 
 // Standard NFL win-percentage formula (a tie counts as half a win and
 // half a loss) — null with no games played yet rather than 0, so a
@@ -78,57 +41,17 @@ export function nflWinPct(rec){
   return total > 0 ? (rec.wins + rec.ties * 0.5) / total : null;
 }
 
-export function fetchNflRecords(){
-  if(nflRecordsCache.loading) return nflRecordsPromise;
-  if(nflRecordsIsFresh()) return Promise.resolve();
-  const sportId = RUNDOWN_SPORT_ID.nfl;
-  if(!DASHBOARD_WORKER_BASE || !sportId) return Promise.resolve();
-
-  nflRecordsCache.loading = true;
-  nflRecordsPromise = (async () => {
-    const data = await fetchJSON(`${DASHBOARD_WORKER_BASE}/teams/${sportId}`);
-    nflRecordsCache.loading = false;
-    // The response also bundles AFC/NFC conference-aggregate rows and a
-    // placeholder "NFL Field"/"TBD" entry — none of those carry a
-    // division, so filtering on that keeps just the 32 real teams.
-    const teams = data && data.teams && data.teams.filter(t => t.division);
-    if(teams && teams.length){
-      const byTeamId = {};
-      teams.forEach(t => { byTeamId[t.team_id] = t; });
-      nflRecordsCache.byTeamId = byTeamId;
-      nflRecordsCache.error = false;
-      nflRecordsCache.fetchedAt = Date.now();
-      saveNflRecordsCache();
-    } else if(!nflRecordsCache.byTeamId){
-      // Only flag "no data" if we never had a table to fall back on —
-      // same "don't blank out a good cache on a transient miss" rule
-      // fetchEplStandingsTable follows in js/standings-epl.js.
-      nflRecordsCache.error = true;
-    }
-    renderStandings();
-    renderAllNflCardRecords();
-
-    // If an NFL team's modal happens to be open already (its stats cell
-    // rendered before this fetch resolved), refresh it now rather than
-    // leaving the fallback bio stats up until reopened.
-    const activeTeam = document.getElementById('modal-content').dataset.activeTeam;
-    const activeMeta = activeTeam && TEAM_META[activeTeam];
-    if(activeMeta && activeMeta.leagueKey === 'nfl'){
-      renderStats(activeMeta, liveDataCache[activeTeam] || {});
-    }
-  })();
-  return nflRecordsPromise;
-}
-
-// Record shown on each NFL team's board row — same nflRecordsCache the
-// Standings tab already fetches, just painted onto the per-team span
-// rather than re-rendering the whole board (mirrors renderCfbCardRecord
-// in js/standings-cfb.js).
+// Record shown on each NFL team's board row — same espnNflStandingsCache
+// the Standings tab already fetches, just painted onto the per-team
+// span rather than re-rendering the whole board (mirrors
+// renderCfbCardRecord in js/standings-cfb.js). Unlike CFB's ranking
+// pull (Top 25 only), ESPN's NFL standings cover all 32 teams, so this
+// can fully replace the old TheRundown-sourced version instead of only
+// overlaying part of it — see findEspnNflRow below.
 export function nflRecordLabel(meta){
-  const rec = meta.rundownTeamId ? (nflRecordsCache.byTeamId || {})[meta.rundownTeamId] : null;
-  if(!rec || !rec.record) return '';
-  const parsed = parseNflRecord(rec.record);
-  return parsed ? `${parsed.wins}-${parsed.losses}${parsed.ties ? '-' + parsed.ties : ''}` : rec.record;
+  const row = findEspnNflRow(meta);
+  if(!row) return '';
+  return `${row.wins}-${row.losses}${row.ties ? '-' + row.ties : ''}`;
 }
 
 export function renderNflCardRecord(teamKey){
@@ -145,10 +68,10 @@ export function renderAllNflCardRecords(){
 // ---- Conference standings (ESPN-sourced — see the file header comment) ----
 
 const ESPN_NFL_STANDINGS_CACHE_KEY = 'teamDashboardEspnNflStandingsCache';
-// Standings can move the moment a game ends, so this stays on the same
-// cadence as nflRecordsCache below rather than CFB's poll-driven
-// once-a-week cache — matched here, not lengthened, even though it's a
-// direct unproxied fetch with no shared budget to protect.
+// Standings can move the moment a game ends, so this stays on an
+// hourly cadence rather than CFB's poll-driven once-a-week cache —
+// matched here, not lengthened, even though it's a direct unproxied
+// fetch with no shared budget to protect.
 const ESPN_NFL_STANDINGS_TTL_MS = 60 * 60 * 1000;
 export const espnNflStandingsCache = { rows: null, error: false, loading: false, fetchedAt: null };
 let espnNflStandingsPromise = null;
@@ -188,16 +111,26 @@ export function fetchEspnNflStandingsCached(){
       saveEspnNflStandingsCache();
     } else if(!espnNflStandingsCache.rows){
       // Same "don't blank out a good cache on a transient miss" rule as
-      // nflRecordsCache/cfbRecordsCache.
+      // cfbRecordsCache in js/standings-cfb.js.
       espnNflStandingsCache.error = true;
     }
     renderStandings();
+    renderAllNflCardRecords();
+
+    // If an NFL team's modal happens to be open already (its stats cell
+    // rendered before this fetch resolved), refresh it now rather than
+    // leaving the fallback bio stats up until reopened.
+    const activeTeam = document.getElementById('modal-content').dataset.activeTeam;
+    const activeMeta = activeTeam && TEAM_META[activeTeam];
+    if(activeMeta && activeMeta.leagueKey === 'nfl'){
+      renderStats(activeMeta, liveDataCache[activeTeam] || {});
+    }
   })();
   return espnNflStandingsPromise;
 }
 
 // ESPN's abbreviation ("WSH") doesn't always match this app's own
-// badgeText ("WAS") — checked every one of the 27 currently-drafted NFL
+// badgeText ("WAS") — checked every one of the 30 currently-drafted NFL
 // teams against a live ESPN standings pull (2026-09-11): Washington is
 // the only mismatch, everything else matches verbatim. Same manual-
 // override idea as CFB_ESPN_NAME_OVERRIDES in js/standings-cfb.js.
@@ -209,6 +142,17 @@ function findNflTeamKeyByEspnAbbr(abbr){
   const wanted = NFL_ESPN_ABBR_OVERRIDES[abbr] || abbr;
   const teams = LEAGUES.find(l => l.key === 'nfl').teams;
   return teams.find(teamKey => TEAM_META[teamKey].badgeText === wanted) || null;
+}
+
+// The reverse direction of findNflTeamKeyByEspnAbbr — given a drafted
+// team's own meta, find its row in the ESPN standings cache. Used by
+// nflRecordLabel (board cards) and js/live-data.js's NFL stat cell, so
+// every place this app shows an NFL team's record reads the exact same
+// ESPN data the Standings tab does, instead of drifting between sources.
+export function findEspnNflRow(meta){
+  const rows = espnNflStandingsCache.rows;
+  if(!rows || !meta.badgeText) return null;
+  return rows.find(row => (NFL_ESPN_ABBR_OVERRIDES[row.abbreviation] || row.abbreviation) === meta.badgeText) || null;
 }
 
 // Conference-only grouping (AFC/NFC, 16 teams each) — see the file
@@ -292,6 +236,15 @@ export function nflStandingsToggleHtml(){
 // LEAGUE_SCORING.nfl.bonus ("Best combined win percentage") exactly, so
 // whoever's #1 here is also who's currently on track for that bonus.
 // Ties on percentage broken by total wins.
+//
+// Reads espnNflStandingsCache rather than TheRundown — unlike CFB's
+// equivalent (which stays on TheRundown because ESPN's CFB endpoint
+// only covers the Top 25, not the full roster most drafted CFB teams
+// need), ESPN's NFL standings already cover all 32 teams, so there's
+// no coverage gap forcing this one to stay on the metered source. Same
+// computation/rendering shape as CFB's version either way (see
+// computeCfbDrafterCombined in js/standings-cfb.js) — only where the
+// win/loss numbers come from differs.
 export function computeNflDrafterCombined(){
   const league = LEAGUES.find(l => l.key === 'nfl');
   const byDrafter = {};
@@ -305,16 +258,14 @@ export function computeNflDrafterCombined(){
     byDrafter[meta.draftTeamId].teamNames.push(meta.name);
   });
 
-  const byTeamId = nflRecordsCache.byTeamId || {};
   league.teams.forEach(teamKey => {
     const meta = TEAM_META[teamKey];
-    const team = meta.rundownTeamId ? byTeamId[meta.rundownTeamId] : null;
-    const rec = team && parseNflRecord(team.record);
-    if(!rec) return;
+    const row = findEspnNflRow(meta);
+    if(!row) return;
     const bucket = byDrafter[meta.draftTeamId];
-    bucket.wins += rec.wins;
-    bucket.losses += rec.losses;
-    bucket.ties += rec.ties;
+    bucket.wins += row.wins;
+    bucket.losses += row.losses;
+    bucket.ties += row.ties;
     bucket.found++;
   });
 
