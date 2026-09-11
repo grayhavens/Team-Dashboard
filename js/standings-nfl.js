@@ -1,12 +1,16 @@
 /* ============================================================
-   NFL Standings: real division-by-division standings, plus each
-   drafter's combined win percentage across their 3 NFL teams.
+   NFL Standings: real division-by-division standings, real
+   conference-wide ranking, and each drafter's combined win percentage
+   across their 3 NFL teams — three separate views because division
+   winner and best-record-in-conference are two different scoring
+   bonuses (see LEAGUE_SCORING.nfl), not just one flat ranking like
+   EPL's table or CFB's Top 25.
    Like CFB, TheSportsDB's lookuptable.php returns genuinely empty for
    the NFL's league id (4391) across every season tested, current and
    historical (confirmed 2026-09-11) — so there's no real per-club
    table to pull from TheSportsDB here either.
 
-   Every view here (Division standings, the per-team record used on
+   Every view here (Divisions, Conference, the per-team record used on
    board cards/the modal, and the "Person" combined-win% breakdown)
    reads ESPN's hidden API (js/espn.js) — see docs/espn-migration-plan.md's
    Phase 3. TheRundown's per-sport team list used to back all of this
@@ -19,15 +23,15 @@
 
    Two different ESPN endpoints back this file, at two different costs:
    fetchEspnNflStandings (js/espn.js) is one flat request, conference-
-   only — that's what backs the record shown on cards/the modal/Person,
-   since those just need a team's own number and don't care about
-   grouping. Division-by-division grouping (this view's actual default)
-   needs 9 requests instead (fetchEspnNflDivisionStandings) since ESPN's
-   simple endpoint doesn't have divisions at all — see that function's
-   own comment in js/espn.js for the full hypermedia chain. Kept as a
-   separate cache/fetch (espnNflDivisionCache below) specifically so the
-   cheap flat data everything else needs doesn't pay for the expensive
-   division fetch every time.
+   only — that's what backs the record shown on cards/the modal/Person
+   AND the Conference view (computeNflConferenceStandings just groups
+   those same rows by conference — free, no extra fetch). Division-by-
+   division grouping needs 9 requests instead (fetchEspnNflDivisionStandings)
+   since ESPN's simple endpoint doesn't have divisions at all — see that
+   function's own comment in js/espn.js for the full hypermedia chain.
+   Kept as a separate cache/fetch (espnNflDivisionCache below)
+   specifically so the cheap flat data everything else needs doesn't pay
+   for the expensive division fetch every time.
    ============================================================ */
 import { LEAGUES, TEAM_META, DRAFT_TEAMS, LEAGUE_SCORING } from './data.js';
 import { teamBadgeHtml, abbrFromName } from './utils.js';
@@ -158,6 +162,33 @@ export function findEspnNflRow(meta){
   return rows.find(row => (NFL_ESPN_ABBR_OVERRIDES[row.abbreviation] || row.abbreviation) === meta.badgeText) || null;
 }
 
+// Conference-wide ranking (AFC/NFC, 16 teams each) — distinct from the
+// Division view below: division winners and conference-best-record are
+// two separate scoring bonuses (see LEAGUE_SCORING.nfl), so a team can
+// be worth tracking in one view without leading the other. Reads the
+// same cheap flat espnNflStandingsCache the "Person" view already uses
+// (conference is a field right there on each row), so this costs
+// nothing extra over what's already fetched — no separate cache needed.
+export function computeNflConferenceStandings(){
+  const rows = espnNflStandingsCache.rows || [];
+  const groups = {}; // conferenceAbbr -> [row, ...]
+  rows.forEach(row => {
+    (groups[row.conferenceAbbr] || (groups[row.conferenceAbbr] = [])).push(row);
+  });
+
+  Object.values(groups).forEach(list => {
+    list.sort((a, b) => {
+      const pa = a.winPercent ?? -1, pb = b.winPercent ?? -1;
+      if(pb !== pa) return pb - pa;
+      return a.teamName.localeCompare(b.teamName);
+    });
+  });
+
+  // AFC before NFC, matching the Division view's own ordering
+  // (alphabetical sort already gives this order).
+  return Object.keys(groups).sort().map(abbr => ({ name: abbr, teams: groups[abbr] }));
+}
+
 // ---- Division standings (the heavier ESPN fetch — see the file header comment) ----
 
 const ESPN_NFL_DIVISIONS_CACHE_KEY = 'teamDashboardEspnNflDivisionsCache';
@@ -260,10 +291,14 @@ export function renderNflStandingsRow(row, rank){
   `;
 }
 
-// Toggle between the real division-by-division standings and each
-// drafter's combined record — same idea as eplStandingsMode/
-// cfbStandingsMode. Defaults to "division" since that's the real
-// external data, matching EPL's "table" / CFB's "ranking" default.
+// Three-way toggle: real division standings, real conference-wide
+// ranking, and each drafter's combined record — same idea as
+// eplStandingsMode/cfbStandingsMode, just a third option since NFL has
+// two separate real groupings worth tracking (not just one, like EPL's
+// table or CFB's Top 25) — division winner and best-record-in-conference
+// are two different scoring bonuses (LEAGUE_SCORING.nfl). Defaults to
+// "division" since that's the richer/more real external data, matching
+// EPL's "table" / CFB's "ranking" default.
 export let nflStandingsMode = 'division';
 
 export function setNflStandingsMode(mode){
@@ -276,6 +311,7 @@ export function nflStandingsToggleHtml(){
   return `
     <div class="standings-toggle">
       <button class="toggle-btn ${nflStandingsMode === 'division' ? 'active' : ''}" onclick="setNflStandingsMode('division')">Divisions</button>
+      <button class="toggle-btn ${nflStandingsMode === 'conference' ? 'active' : ''}" onclick="setNflStandingsMode('conference')">Conference</button>
       <button class="toggle-btn ${nflStandingsMode === 'byDrafter' ? 'active' : ''}" onclick="setNflStandingsMode('byDrafter')">Person</button>
     </div>
   `;

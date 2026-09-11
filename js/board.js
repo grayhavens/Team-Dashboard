@@ -23,9 +23,9 @@ import {
 } from './standings-cfb.js';
 import {
   nflStandingsMode, computeNflDrafterCombined, renderNflByDrafterRow,
-  computeNflDivisionStandings, renderNflStandingsRow, renderNflGroupHeader, nflStandingsToggleHtml,
-  renderAllNflCardRecords, espnNflStandingsCache, fetchEspnNflStandingsCached, loadEspnNflStandingsCache,
-  espnNflDivisionCache, fetchEspnNflDivisionStandingsCached, loadEspnNflDivisionCache
+  computeNflDivisionStandings, computeNflConferenceStandings, renderNflStandingsRow, renderNflGroupHeader,
+  nflStandingsToggleHtml, renderAllNflCardRecords, espnNflStandingsCache, fetchEspnNflStandingsCached,
+  loadEspnNflStandingsCache, espnNflDivisionCache, fetchEspnNflDivisionStandingsCached, loadEspnNflDivisionCache
 } from './standings-nfl.js';
 import { renderOverallStandings, setObMode } from './overall.js';
 import { loadLiveDataCache, loadTeamInfoCache, renderRowStatus, backgroundRefreshTick, REFRESH_STEP_MS, liveDataCache } from './live-data.js';
@@ -351,25 +351,15 @@ export function renderStandings(){
     }
 
     if(league.key === 'nfl'){
-      // "Person" reads the cheap flat espnNflStandingsCache (a team's
-      // own record, no grouping needed) while "Divisions" reads the
-      // much heavier espnNflDivisionCache (9 requests instead of 1) —
-      // so, unlike CFB where the split is about TheRundown vs ESPN,
-      // this split is about which ESPN cache is cheap enough for the
-      // job. See js/standings-nfl.js's header comment.
+      // "Divisions" reads the much heavier espnNflDivisionCache (9
+      // requests instead of 1); "Conference" and "Person" both just
+      // need a team's own record with no per-division grouping, so
+      // they share the cheap flat espnNflStandingsCache — unlike CFB
+      // where the split is about TheRundown vs ESPN, this split is
+      // about which ESPN cache is cheap enough for the job. See
+      // js/standings-nfl.js's header comment.
       let bodyHtml;
-      if(nflStandingsMode === 'byDrafter'){
-        if(espnNflStandingsCache.rows){
-          const rowsHtml = computeNflDrafterCombined().map((row, i) => renderNflByDrafterRow(row, i + 1)).join('');
-          bodyHtml = nflStandingsToggleHtml() + rowsHtml;
-          fetchEspnNflStandingsCached(); // no-op if already fresh; quietly refreshes in the background if stale
-        } else if(espnNflStandingsCache.error){
-          bodyHtml = `<div class="no-live-note">No data available.</div>`;
-        } else {
-          fetchEspnNflStandingsCached();
-          bodyHtml = `<div class="loading-note">Loading standings…</div>`;
-        }
-      } else {
+      if(nflStandingsMode === 'division'){
         if(espnNflDivisionCache.divisions){
           const divisions = computeNflDivisionStandings();
           const rowsHtml = divisions.length
@@ -383,6 +373,25 @@ export function renderStandings(){
           bodyHtml = `<div class="no-live-note">No data available.</div>`;
         } else {
           fetchEspnNflDivisionStandingsCached();
+          bodyHtml = `<div class="loading-note">Loading standings…</div>`;
+        }
+      } else {
+        if(espnNflStandingsCache.rows){
+          let rowsHtml;
+          if(nflStandingsMode === 'byDrafter'){
+            rowsHtml = computeNflDrafterCombined().map((row, i) => renderNflByDrafterRow(row, i + 1)).join('');
+          } else {
+            const conferences = computeNflConferenceStandings();
+            rowsHtml = conferences.map(conf =>
+              renderNflGroupHeader(conf.name) + conf.teams.map((t, i) => renderNflStandingsRow(t, i + 1)).join('')
+            ).join('');
+          }
+          bodyHtml = nflStandingsToggleHtml() + rowsHtml;
+          fetchEspnNflStandingsCached(); // no-op if already fresh; quietly refreshes in the background if stale
+        } else if(espnNflStandingsCache.error){
+          bodyHtml = `<div class="no-live-note">No data available.</div>`;
+        } else {
+          fetchEspnNflStandingsCached();
           bodyHtml = `<div class="loading-note">Loading standings…</div>`;
         }
       }
