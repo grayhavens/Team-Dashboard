@@ -8,7 +8,7 @@
    way EPL is done here.
    ============================================================ */
 import { LEAGUES, TEAM_META, DRAFT_TEAMS, LEAGUE_SCORING } from './data.js';
-import { fetchJSON, findDraftedTeamByName, teamBadgeHtml, abbrFromName } from './utils.js';
+import { fetchJSON, findDraftedTeamByName, teamBadgeHtml, abbrFromName, ordinal } from './utils.js';
 import { DASHBOARD_WORKER_BASE } from './api.js';
 import { renderStandings } from './board.js';
 import { liveDataCache, renderLiveBundle } from './live-data.js';
@@ -81,6 +81,7 @@ export function fetchEplStandingsTable(){
       eplStandingsCache.error = true;
     }
     renderStandings();
+    renderAllEplCardRecords();
     // Modal stats (renderStats) read eplStandingsCache.table directly
     // rather than storing their own copy, so if the currently-open
     // team's modal is EPL, repaint it now that the table just changed.
@@ -88,6 +89,31 @@ export function fetchEplStandingsTable(){
     if(activeTeam && liveDataCache[activeTeam]) renderLiveBundle(activeTeam, liveDataCache[activeTeam]);
   })();
   return eplStandingsPromise;
+}
+
+// Record + table position shown on each EPL team's board row, in place
+// of the static "Premier League" boardSub text (every EPL team is in
+// the same league, so that label carried no information) — same
+// eplStandingsCache the Standings tab already fetches, just painted
+// onto the per-team span rather than re-rendering the whole board (see
+// cfbRecordLabel/renderCfbCardRecord in js/standings-cfb.js for the
+// identical pattern on the CFB side).
+export function eplRecordLabel(meta){
+  const row = meta.sportsdbId && eplStandingsCache.table
+    ? eplStandingsCache.table.find(r => r.idTeam === meta.sportsdbId)
+    : null;
+  if(!row) return '';
+  return `${row.intWin}-${row.intDraw}-${row.intLoss} &middot; ${ordinal(row.intRank)}`;
+}
+
+export function renderEplCardRecord(teamKey){
+  const el = document.getElementById('epl-record-' + teamKey);
+  if(!el) return;
+  el.innerHTML = eplRecordLabel(TEAM_META[teamKey]) || 'Premier League';
+}
+
+export function renderAllEplCardRecords(){
+  LEAGUES.find(l => l.key === 'epl').teams.forEach(renderEplCardRecord);
 }
 
 export function renderStandingsRow(leagueKey, row){

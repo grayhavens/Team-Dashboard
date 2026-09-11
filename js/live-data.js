@@ -5,7 +5,7 @@
    ============================================================ */
 import { TEAM_META } from './data.js';
 import { fetchJSON, ordinal, formatKickoff, formatUpdatedAt, teamBadgeHtml, lockBodyScroll, unlockBodyScroll } from './utils.js';
-import { API_BASE, fetchRundownEventForTeam, isRundownEventLive, V2_MIGRATED_LEAGUES, fetchSportsDbV2Team, fetchSportsDbV2Schedule } from './api.js';
+import { API_BASE, fetchRundownEventForTeam, isRundownEventLive, V2_MIGRATED_LEAGUES, UPCOMING_CHIP_LEAGUES, fetchSportsDbV2Team, fetchSportsDbV2Schedule } from './api.js';
 import { eplStandingsCache, fetchEplStandingsTable } from './standings-epl.js';
 import { cfbRecordsCache } from './standings-cfb.js';
 import { trackerSectionHtml } from './league-facts.js';
@@ -344,6 +344,15 @@ function renderUpdatedAt(bundle){
   el.textContent = `Last updated: ${formatUpdatedAt(bundle.fetchedAt)}`;
 }
 
+// Compact date label for the "next match" row-status pill — "Today
+// 6:00 PM" for a game today, otherwise a short weekday + time
+// ("Sat 11:30 AM") since there's no room in the pill for a full date.
+function formatChipUpcoming(d){
+  const time = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  if(d.toDateString() === new Date().toDateString()) return 'Today ' + time;
+  return d.toLocaleDateString('en-US', { weekday: 'short' }) + ' ' + time;
+}
+
 // Board-row pill: reuses whatever the modal fetch already pulled
 // (last result / next fixture) rather than fetching anything extra,
 // so it stays inside the same 30 req/min budget described in js/api.js.
@@ -376,34 +385,43 @@ export function renderRowStatus(teamKey, bundle){
   if(bundle.rundownOnly && rStatus === 'STATUS_SCHEDULED' && rEvt.event_date){
     const d = new Date(rEvt.event_date);
     if(!isNaN(d.getTime())){
-      el.textContent = 'Today ' + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+      el.textContent = formatChipUpcoming(d);
       el.className = 'row-status next';
       return;
     }
   }
+
+  // CFB/EPL show the next match regardless of when it falls, rather
+  // than only for today's game — see UPCOMING_CHIP_LEAGUES in
+  // js/api.js. Every other league keeps "today's game, else last
+  // result", since a nightly slate makes "next match" far less
+  // interesting than a look back at how last night went.
+  const showsUpcoming = UPCOMING_CHIP_LEAGUES.includes(meta.leagueKey);
 
   const nextEvt = bundle.next && bundle.next.events && bundle.next.events[0];
   if(nextEvt && nextEvt.strTimestamp){
     const d = new Date(nextEvt.strTimestamp.includes('Z') ? nextEvt.strTimestamp : nextEvt.strTimestamp + 'Z');
-    if(!isNaN(d.getTime()) && d.toDateString() === new Date().toDateString()){
-      el.textContent = 'Today ' + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+    if(!isNaN(d.getTime()) && (showsUpcoming || d.toDateString() === new Date().toDateString())){
+      el.textContent = formatChipUpcoming(d);
       el.className = 'row-status next';
       return;
     }
   }
 
-  const lastEvt = bundle.last && bundle.last.results && bundle.last.results[0];
-  if(lastEvt){
-    const isHome = String(lastEvt.idHomeTeam) === String(id);
-    const own = isHome ? lastEvt.intHomeScore : lastEvt.intAwayScore;
-    const opp = isHome ? lastEvt.intAwayScore : lastEvt.intHomeScore;
-    if(own !== null && opp !== null && own !== undefined && opp !== undefined){
-      const ownN = parseInt(own, 10), oppN = parseInt(opp, 10);
-      let cls = 'd', label = 'D';
-      if(ownN > oppN){ cls = 'w'; label = 'W'; } else if(ownN < oppN){ cls = 'l'; label = 'L'; }
-      el.textContent = `${label} ${ownN}-${oppN}`;
-      el.className = 'row-status ' + cls;
-      return;
+  if(!showsUpcoming){
+    const lastEvt = bundle.last && bundle.last.results && bundle.last.results[0];
+    if(lastEvt){
+      const isHome = String(lastEvt.idHomeTeam) === String(id);
+      const own = isHome ? lastEvt.intHomeScore : lastEvt.intAwayScore;
+      const opp = isHome ? lastEvt.intAwayScore : lastEvt.intHomeScore;
+      if(own !== null && opp !== null && own !== undefined && opp !== undefined){
+        const ownN = parseInt(own, 10), oppN = parseInt(opp, 10);
+        let cls = 'd', label = 'D';
+        if(ownN > oppN){ cls = 'w'; label = 'W'; } else if(ownN < oppN){ cls = 'l'; label = 'L'; }
+        el.textContent = `${label} ${ownN}-${oppN}`;
+        el.className = 'row-status ' + cls;
+        return;
+      }
     }
   }
 

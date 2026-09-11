@@ -9,9 +9,11 @@
 import { DRAFT_TEAMS, TEAM_META, LEAGUES, LEAGUE_SCORING } from './data.js';
 import { updateUrlParam, lockBodyScroll, CLOSE_ICON_SVG, teamBadgeHtml } from './utils.js';
 import { LEAGUE_FACTS_LEAGUES, migrateAchievementsToFacts } from './league-facts.js';
+import { UPCOMING_CHIP_LEAGUES } from './api.js';
 import {
   eplStandingsCache, eplStandingsMode, computeEplDrafterCombined, renderEplByDrafterRow,
-  renderStandingsRow, eplStandingsToggleHtml, fetchEplStandingsTable, loadEplStandingsCache
+  renderStandingsRow, eplStandingsToggleHtml, fetchEplStandingsTable, loadEplStandingsCache,
+  renderAllEplCardRecords
 } from './standings-epl.js';
 import {
   cfbRecordsCache, cfbStandingsMode, computeCfbDrafterCombined, renderCfbByDrafterRow,
@@ -112,12 +114,19 @@ export function renderBoard(){
     const teamsHtml = leagueTeams.map(teamKey => {
       const meta = TEAM_META[teamKey];
       const cfbRecordHtml = league.key === 'cfb' ? `<span class="cfb-record" id="cfb-record-${teamKey}"></span>` : '';
+      // EPL: every team is in the same one league, so the static
+      // "Premier League" boardSub text carried no information — swap
+      // it for the team's own record + table position instead (see
+      // eplRecordLabel/renderEplCardRecord in js/standings-epl.js).
+      const subHtml = league.key === 'epl'
+        ? `<span class="epl-record" id="epl-record-${teamKey}"></span>`
+        : `${meta.boardSub}${cfbRecordHtml}`;
       return `
         <div class="team clickable" onclick="openTeamModal('${teamKey}')">
           ${teamBadgeHtml(meta)}
           <div class="team-main">
             <div class="team-name">${meta.name}</div>
-            <div class="team-sub">${meta.boardSub}${cfbRecordHtml}</div>
+            <div class="team-sub">${subHtml}</div>
           </div>
           <div class="row-status" id="row-status-${teamKey}"></div>
         </div>
@@ -126,9 +135,12 @@ export function renderBoard(){
 
     return `
       <div class="league" id="league-${league.key}">
-        <div class="league-tab">
-          <div class="league-tab-left">${league.label} <span class="n">${league.season}</span></div>
-          <span class="n">Last Result</span>
+        <div class="league-tab board-league-tab">
+          <div class="league-tab-left">${LEAGUE_FULL_LABELS[league.key] || league.label}</div>
+          <div class="league-tab-right">
+            <span class="n">${league.season}</span>
+            <span class="n">${UPCOMING_CHIP_LEAGUES.includes(league.key) ? 'Upcoming' : 'Last Result'}</span>
+          </div>
         </div>
         ${teamsHtml}
       </div>
@@ -136,6 +148,18 @@ export function renderBoard(){
   }).join('');
 
   document.getElementById('team-tally').textContent = `${totalTeams} teams · ${LEAGUES.length} leagues`;
+
+  // The team rows above were just rebuilt from scratch, so every
+  // row-status pill and CFB/EPL record chip starts blank again —
+  // repaint them from whatever's already cached (same as the boot
+  // sequence below) rather than leaving this drafter's roster blank
+  // until the staggered background refresh or the standings TTLs
+  // happen to reach it.
+  for(const teamKey of Object.keys(liveDataCache)){
+    if(TEAM_META[teamKey]) renderRowStatus(teamKey, liveDataCache[teamKey]);
+  }
+  renderAllCfbCardRecords();
+  renderAllEplCardRecords();
 }
 
 export function scrollToLeague(key){
@@ -194,11 +218,18 @@ export function openLeagueModal(leagueKey){
 }
 window.openLeagueModal = openLeagueModal;
 
-// Spelled out only in the Standings header — the filter chips, Board
-// tab, and modal titles all keep the short LEAGUES[].label as-is.
-const STANDINGS_HEADER_LABELS = {
+// Spelled out in both the Teams tab's section headers and the
+// Standings header — the filter chips and modal titles still keep the
+// short LEAGUES[].label as-is (see FILTER_CHIP_LABELS below).
+const LEAGUE_FULL_LABELS = {
   epl: 'English Premier League',
-  cfb: 'College Football'
+  cfb: 'College Football',
+  nfl: 'National Football League',
+  mcbb: 'College Basketball',
+  nba: 'National Basketball Association',
+  nhl: 'National Hockey League',
+  mlb: 'Major League Baseball',
+  wnba: "Women's National Basketball Association"
 };
 
 // Shortened further still for the filter chip row only — the Teams
@@ -214,7 +245,7 @@ function leagueBlockHtml(league, bodyHtml){
   const resultsChipHtml = LEAGUE_FACTS_LEAGUES.includes(league.key)
     ? `<div class="scoring-chip" onclick="openLeagueResultsModal('${league.key}')">Results</div>`
     : '';
-  const headerLabel = STANDINGS_HEADER_LABELS[league.key] || league.label;
+  const headerLabel = LEAGUE_FULL_LABELS[league.key] || league.label;
 
   return `
     <div class="league">
@@ -333,21 +364,15 @@ loadTeamInfoCache();
 renderBoard();
 applyUrlState();
 
-// Paint every team's row-status pill from whatever's cached (possibly
-// from a previous browser session) before the first real fetch even
-// starts, so nothing sits blank waiting for its turn in the staggered
-// refresh below. TEAM_META[teamKey] is checked in case a cache entry
-// is left over from a team that no longer exists after a data.js edit.
-for(const teamKey of Object.keys(liveDataCache)){
-  if(TEAM_META[teamKey]) renderRowStatus(teamKey, liveDataCache[teamKey]);
-}
-
-// Same idea for CFB records/ranks: paint from whatever's cached, then
-// kick off a fetch regardless of whether the Standings tab (the only
-// other place that calls this) has been opened yet, so the board's
+// renderBoard() already repaints row-status pills and CFB/EPL record
+// chips from whatever's cached (possibly from a previous browser
+// session), so nothing sits blank waiting for its turn in the
+// staggered refresh below. Still need to kick off the actual records
+// fetches here, regardless of whether the Standings tab (the only
+// other place that calls these) has been opened yet, so the board's
 // records aren't stuck waiting on that.
-renderAllCfbCardRecords();
 fetchCfbRecords();
+fetchEplStandingsTable();
 
 backgroundRefreshTick();
 setInterval(backgroundRefreshTick, REFRESH_STEP_MS);
