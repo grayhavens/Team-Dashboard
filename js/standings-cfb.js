@@ -214,11 +214,15 @@ export function computeCfbRankingTable(){
 
 export function renderCfbRankingRow(rank){
   const teamKey = findCfbTeamKeyByEspnLocation(rank.location);
+  // A ranked-but-undrafted team has no TEAM_META entry (so no SportsDB
+  // badge), but ESPN's own logoUrl covers that — same real-crest
+  // treatment drafted teams get, teamBadgeHtml's onerror handler falls
+  // back to the plain monogram below if it ever fails to load.
   const meta = teamKey ? TEAM_META[teamKey] : {
     name: rank.teamName,
     badgeStyle: 'background: rgba(255,255,255,0.08); color: var(--text-sub); border-color: var(--hairline-strong);',
     badgeText: abbrFromName(rank.teamName),
-    badgeUrl: null
+    badgeUrl: rank.logoUrl || null
   };
   const draftedByHtml = teamKey
     ? `<div class="drafted-by-chip">${DRAFT_TEAMS.find(d => d.id === meta.draftTeamId).name}</div>`

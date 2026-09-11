@@ -238,11 +238,14 @@ export function renderNflGroupHeader(label){
 
 export function renderNflStandingsRow(row, rank){
   const teamKey = findNflTeamKeyByEspnAbbr(row.abbreviation);
+  // Same idea as CFB's renderCfbRankingRow: an undrafted team has no
+  // SportsDB badge, but ESPN's own logoUrl covers it — real crest,
+  // same onerror fallback to the plain monogram if it ever fails.
   const meta = teamKey ? TEAM_META[teamKey] : {
     name: row.teamName,
     badgeStyle: 'background: rgba(255,255,255,0.08); color: var(--text-sub); border-color: var(--hairline-strong);',
     badgeText: row.abbreviation || abbrFromName(row.teamName),
-    badgeUrl: null
+    badgeUrl: row.logoUrl || null
   };
   const draftedByHtml = teamKey
     ? `<div class="drafted-by-chip">${DRAFT_TEAMS.find(d => d.id === meta.draftTeamId).name}</div>`
