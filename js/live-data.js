@@ -6,7 +6,8 @@
 import { TEAM_META } from './data.js';
 import { fetchJSON, ordinal, formatKickoff, formatUpdatedAt, teamBadgeHtml, lockBodyScroll, unlockBodyScroll } from './utils.js';
 import { API_BASE, fetchRundownEventForTeam, isRundownEventLive, V2_MIGRATED_LEAGUES, UPCOMING_CHIP_LEAGUES, fetchSportsDbV2Team, fetchSportsDbV2Schedule } from './api.js';
-import { eplStandingsCache, fetchEplStandingsTable } from './standings-epl.js';
+import { fetchEplStandingsTable, findEspnEplRow } from './standings-epl.js';
+import { fetchEspnEplTeamSchedule } from './espn.js';
 import { cfbRecordsCache } from './standings-cfb.js';
 import { findEspnNflRow } from './standings-nfl.js';
 import { trackerSectionHtml } from './league-facts.js';
@@ -138,24 +139,41 @@ async function fetchTeamBundle(teamKey){
   const meta = TEAM_META[teamKey];
   if(!meta || (!meta.sportsdbId && !meta.rundownTeamId)) return null;
 
-  // TheSportsDB-primary teams (the common case): everything comes from
-  // TheSportsDB, optionally supplemented with TheRundown's in-game
-  // state for leagues in RUNDOWN_SPORT_ID (see fetchRundownEventForTeam).
   if(meta.sportsdbId){
     const id = meta.sportsdbId;
     const useV2 = V2_MIGRATED_LEAGUES.includes(meta.leagueKey);
-    // Standings come from the one shared eplStandingsCache (see
-    // fetchEplStandingsTable) rather than each team fetching and
-    // storing its own copy of the same league table — renderStats
-    // reads eplStandingsCache.table directly, so nothing from that
-    // fetch needs to end up in this team's own bundle. Team info is
-    // similarly decoupled — see fetchTeamInfoCached — since it's the
-    // one piece of this bundle that's effectively static.
-    const [info, last, next, , rundownEvent] = await Promise.all([
+
+    // EPL: real schedule (past results + every remaining fixture) from
+    // ESPN (js/espn.js) instead of TheSportsDB V2's schedule-previous/
+    // schedule-next — see fetchEspnEplTeamSchedule for what that adds
+    // (real venue names, TV broadcasts). Standings have to load first:
+    // ESPN's team ids don't line up with TheSportsDB's sportsdbId (same
+    // issue findEspnEplRow already solves for the stat strip), so this
+    // club's ESPN id is resolved by name through the standings table
+    // rather than carried as its own TEAM_META field.
+    if(meta.leagueKey === 'epl'){
+      await fetchEplStandingsTable();
+      const row = findEspnEplRow(meta);
+      const [info, eplSchedule, rundownEvent] = await Promise.all([
+        fetchTeamInfoCached(teamKey, id, useV2),
+        row ? fetchEspnEplTeamSchedule(row.id) : Promise.resolve(null),
+        fetchRundownEventForTeam(meta)
+      ]);
+      const bundle = { info, last: null, next: null, eplSchedule, rundownEvent, rundownTeamId: meta.rundownTeamId || null, fetchedAt: new Date() };
+      setTeamBundle(teamKey, bundle);
+      return bundle;
+    }
+
+    // TheSportsDB-primary teams (the common case): everything comes from
+    // TheSportsDB, optionally supplemented with TheRundown's in-game
+    // state for leagues in RUNDOWN_SPORT_ID (see fetchRundownEventForTeam).
+    // Team info is decoupled from this per-tick fetch — see
+    // fetchTeamInfoCached — since it's the one piece of this bundle
+    // that's effectively static.
+    const [info, last, next, rundownEvent] = await Promise.all([
       fetchTeamInfoCached(teamKey, id, useV2),
       useV2 ? fetchSportsDbV2Schedule('schedule-previous', id) : fetchJSON(`${API_BASE}eventslast.php?id=${id}`),
       useV2 ? fetchSportsDbV2Schedule('schedule-next', id) : fetchJSON(`${API_BASE}eventsnext.php?id=${id}`),
-      meta.leagueId ? fetchEplStandingsTable() : Promise.resolve(null),
       fetchRundownEventForTeam(meta)
     ]);
 
@@ -177,16 +195,36 @@ async function fetchTeamBundle(teamKey){
 export function renderStats(meta, bundle){
   const el = document.getElementById('live-stats');
   if(!el) return;
-  const id = meta.sportsdbId;
 
-  const row = eplStandingsCache.table ? eplStandingsCache.table.find(r => r.idTeam === id) : null;
-  if(row){
-    el.innerHTML = `
-      <div class="stat-cell"><div class="num">${ordinal(row.intRank)}</div><div class="lbl">Position</div></div>
-      <div class="stat-cell"><div class="num">${row.intPoints}</div><div class="lbl">Points</div></div>
-      <div class="stat-cell"><div class="num">${row.intWin}-${row.intDraw}-${row.intLoss}</div><div class="lbl">W-D-L</div></div>
-    `;
-    return;
+  // EPL: same ESPN standings source the Standings tab reads (see
+  // findEspnEplRow/eplRecordLabel in js/standings-epl.js) — this used
+  // to match on TheSportsDB's idTeam/sportsdbId; ESPN's team ids don't
+  // line up with those, so this matches by club name instead, same as
+  // everywhere else in standings-epl.js.
+  if(meta.leagueKey === 'epl'){
+    const row = findEspnEplRow(meta);
+    if(row){
+      el.innerHTML = `
+        <div class="stat-cell"><div class="num">${ordinal(row.rank)}</div><div class="lbl">Position</div></div>
+        <div class="stat-cell"><div class="num">${row.points}</div><div class="lbl">Points</div></div>
+        <div class="stat-cell"><div class="num">${row.wins}-${row.draws}-${row.losses}</div><div class="lbl">W-D-L</div></div>
+      `;
+      // Champions League/Europa League/Relegation — straight off ESPN's
+      // own qualification-zone note, which TheSportsDB's table never
+      // had at all. Sits in the modal head (see openTeamModal), not the
+      // stat strip, so this only updates that one span rather than
+      // re-rendering stats around it.
+      const zoneEl = document.getElementById('zone-tag');
+      if(zoneEl){
+        // display toggled (not just emptied) so an inactive zone doesn't
+        // still eat a flex gap slot in .modal-sub next to it.
+        zoneEl.style.display = row.zone ? 'inline-block' : 'none';
+        zoneEl.innerHTML = row.zone
+          ? `<span class="zone-tag" style="background:${row.zoneColor || 'rgba(255,255,255,0.14)'};">${row.zone}</span>`
+          : '';
+      }
+      return;
+    }
   }
 
   // CFB: TheRundown's /teams/{sportId} (already fetched for the
@@ -239,6 +277,25 @@ export function renderStats(meta, bundle){
     : `<div class="stat-cell" style="flex:1;"><div class="lbl">Live stats unavailable right now</div></div>`;
 }
 
+// Last 5 results as a compact row of pills, oldest on the left ending
+// with the most recent (matches recentEvents' own newest-first order,
+// so this just reverses a slice of it) — the detailed line rendered
+// below it always covers the rightmost/most recent one already.
+function formStripHtml(recentEvents){
+  const last5 = recentEvents.slice(0, 5).reverse();
+  return `
+    <div class="form-strip">
+      ${last5.map(evt => {
+        let cls = 'd', label = 'D';
+        if(evt.ownScore > evt.oppScore){ cls = 'w'; label = 'W'; }
+        else if(evt.ownScore < evt.oppScore){ cls = 'l'; label = 'L'; }
+        const title = `${evt.isHome ? 'vs' : 'at'} ${evt.opponentName} · ${evt.ownScore}-${evt.oppScore}`;
+        return `<div class="form-pill ${cls}" title="${title}">${label}</div>`;
+      }).join('')}
+    </div>
+  `;
+}
+
 function renderForm(id, bundle){
   const el = document.getElementById('live-form');
   if(!el) return;
@@ -257,6 +314,34 @@ function renderForm(id, bundle){
           <span class="meta">${line.isHome ? 'Home' : 'Away'}</span>
         </div>
         <div class="form-score">${line.own}–${line.opp}</div>
+      </div>
+    `;
+    return;
+  }
+
+  // EPL: real schedule data from ESPN (js/espn.js) instead of
+  // TheSportsDB's eventslast — see fetchEspnEplTeamSchedule. Adds a
+  // "Form" strip (last 5 results) above the usual detailed line, and a
+  // real venue name on that line — neither available from TheSportsDB.
+  if(bundle.eplSchedule){
+    const recent = bundle.eplSchedule.recent;
+    const evt = recent && recent[0];
+    if(!evt){
+      el.innerHTML = `<div class="loading-note">No recent result found.</div>`;
+      return;
+    }
+    let result = 'd', label = 'D';
+    if(evt.ownScore > evt.oppScore){ result = 'w'; label = 'W'; }
+    else if(evt.ownScore < evt.oppScore){ result = 'l'; label = 'L'; }
+    el.innerHTML = `
+      ${formStripHtml(recent)}
+      <div class="form-item">
+        <div class="form-pill ${result}">${label}</div>
+        <div class="form-detail">
+          <span class="opp">${evt.opponentName}</span>
+          <span class="meta">${evt.isHome ? 'Home' : 'Away'}${evt.venueName ? ' · ' + evt.venueName : ''}</span>
+        </div>
+        <div class="form-score">${evt.ownScore}–${evt.oppScore}</div>
       </div>
     `;
     return;
@@ -339,6 +424,26 @@ function renderNext(id, bundle){
     return;
   }
 
+  // EPL: real schedule data from ESPN (js/espn.js) instead of
+  // TheSportsDB's eventsnext — see fetchEspnEplTeamSchedule. Adds the
+  // real venue and TV broadcast, neither available from TheSportsDB.
+  if(bundle.eplSchedule){
+    const evt = bundle.eplSchedule.upcoming && bundle.eplSchedule.upcoming[0];
+    if(!evt){
+      el.innerHTML = `<div class="loading-note">No upcoming match scheduled yet.</div>`;
+      return;
+    }
+    const metaLine = [evt.isHome ? 'Home' : 'Away', evt.venueName, evt.broadcast].filter(Boolean).join(' · ');
+    el.innerHTML = `
+      <div class="nm-left">
+        <div class="nm-teams">${evt.isHome ? 'vs' : 'at'} ${evt.opponentName}</div>
+        <div class="nm-when">${formatKickoff(evt.date)}</div>
+        <div class="nm-venue">${metaLine}</div>
+      </div>
+    `;
+    return;
+  }
+
   const evt = bundle.next && bundle.next.events && bundle.next.events[0];
   if(!evt){
     el.innerHTML = bundle.rundownOnly
@@ -411,11 +516,30 @@ export function renderRowStatus(teamKey, bundle){
     }
   }
 
-  // CFB/EPL show the next match regardless of when it falls, rather
-  // than only for today's game — see UPCOMING_CHIP_LEAGUES in
-  // js/api.js. Every other league keeps "today's game, else last
-  // result", since a nightly slate makes "next match" far less
-  // interesting than a look back at how last night went.
+  // EPL: real schedule data from ESPN (js/espn.js) instead of
+  // TheSportsDB's eventsnext — see fetchEspnEplTeamSchedule. EPL is
+  // itself in UPCOMING_CHIP_LEAGUES below, so this pill always shows
+  // the next match regardless of when it falls, same as before.
+  if(bundle.eplSchedule){
+    const nextEvt = bundle.eplSchedule.upcoming && bundle.eplSchedule.upcoming[0];
+    if(nextEvt){
+      const d = new Date(nextEvt.date);
+      if(!isNaN(d.getTime())){
+        el.textContent = formatChipUpcoming(d);
+        el.className = 'row-status next';
+        return;
+      }
+    }
+    el.textContent = '';
+    el.className = 'row-status';
+    return;
+  }
+
+  // CFB shows the next match regardless of when it falls, rather than
+  // only for today's game — see UPCOMING_CHIP_LEAGUES in js/api.js.
+  // Every other league keeps "today's game, else last result", since a
+  // nightly slate makes "next match" far less interesting than a look
+  // back at how last night went.
   const showsUpcoming = UPCOMING_CHIP_LEAGUES.includes(meta.leagueKey);
 
   const nextEvt = bundle.next && bundle.next.events && bundle.next.events[0];
@@ -493,7 +617,7 @@ export function openTeamModal(teamKey){
       ${teamBadgeHtml(meta)}
       <div>
         <h2>${meta.name}</h2>
-        <div class="modal-sub">${meta.sub}${hasLive ? ' <span class="live-badge">LIVE</span>' : ''}</div>
+        <div class="modal-sub">${meta.sub}${hasLive ? ' <span class="live-badge">LIVE</span>' : ''}${meta.leagueKey === 'epl' ? '<span id="zone-tag" style="display:none;"></span>' : ''}</div>
       </div>
       <button class="modal-close" onclick="closeTeamModal()">&times;</button>
     </div>

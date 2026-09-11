@@ -1,8 +1,8 @@
 /* ============================================================
    ESPN HIDDEN API (see docs/espn-migration-plan.md for the full
-   evaluation this started from). Backs CFB's AP Top 25 and all of
-   NFL's standings/rankings — see js/standings-cfb.js and
-   js/standings-nfl.js for how each is wired in.
+   evaluation this started from). Backs CFB's AP Top 25, all of NFL's
+   standings/rankings, and EPL's league table — see js/standings-cfb.js,
+   js/standings-nfl.js and js/standings-epl.js for how each is wired in.
 
    ESPN's undocumented site API (site.web.api.espn.com — confirmed
    byte-identical to the older site.api.espn.com for shared paths, so
@@ -235,4 +235,99 @@ export async function fetchEspnCfbRankings(pollName = 'AP Top 25'){
     points: r.points,
     firstPlaceVotes: r.firstPlaceVotes
   }));
+}
+
+// Real EPL table, all 20 clubs — verified live (2026-09-11): carries
+// every field the old TheSportsDB-sourced table did (rank/win/draw/
+// loss/points), plus fields TheSportsDB's table never had at all —
+// goalsFor/goalsAgainst, goalDifference, gamesPlayed, and a
+// qualification/relegation "zone" tag (e.g. "Champions League",
+// "Relegation") straight from ESPN's own `note` field. A single-table
+// league like the EPL only has one standings type, so (unlike NFL's
+// conference split) this reads `children[0]` rather than mapping over
+// several groups.
+// Shape returned: [{ id, teamName, abbreviation, logoUrl, rank, wins,
+// draws, losses, points, gamesPlayed, goalDifference, goalsFor,
+// goalsAgainst, zone }]
+export async function fetchEspnEplStandings(){
+  const data = await fetchEspnJSON('/apis/v2/sports/soccer/eng.1/standings');
+  const entries = data && data.children && data.children[0] && data.children[0].standings && data.children[0].standings.entries;
+  if(!Array.isArray(entries)) return null;
+
+  return entries.map(entry => {
+    const stat = name => {
+      const s = (entry.stats || []).find(x => x.name === name);
+      return s ? s.value : null;
+    };
+    return {
+      id: entry.team.id,
+      teamName: espnTeamName(entry.team),
+      abbreviation: entry.team.abbreviation,
+      logoUrl: espnLogoUrl(entry.team),
+      rank: stat('rank'),
+      wins: stat('wins'),
+      draws: stat('ties'),
+      losses: stat('losses'),
+      points: stat('points'),
+      gamesPlayed: stat('gamesPlayed'),
+      goalDifference: stat('pointDifferential'),
+      goalsFor: stat('pointsFor'),
+      goalsAgainst: stat('pointsAgainst'),
+      zone: entry.note ? entry.note.description : null,
+      // ESPN's own note.color is occasionally malformed — confirmed live,
+      // Europa League came back as "##B5E7CE" (double leading #) while
+      // Champions League/Relegation were fine — so this strips however
+      // many #'s are actually there and adds back exactly one.
+      zoneColor: entry.note && entry.note.color ? '#' + entry.note.color.replace(/^#+/, '') : null
+    };
+  });
+}
+
+// A club's real schedule — past results and every remaining fixture —
+// verified live (2026-09-11) against Liverpool. ESPN's team schedule
+// endpoint defaults to this season's played matches only (`recent`
+// below); the same endpoint with `?fixture=true` instead returns every
+// remaining fixture, not just the next one (`upcoming` below). Neither
+// needs a second "team detail" call to know the next match id the way
+// TheSportsDB V2's separate schedule-previous/schedule-next calls did.
+// Carries real venue names and TV broadcast info, which TheSportsDB
+// never had at all — see js/live-data.js's renderForm/renderNext for
+// where those show up.
+// Shape returned: { recent, upcoming }, each an array of
+// [{ id, date, completed, statusDetail, isHome, opponentName,
+// opponentLogoUrl, ownScore, oppScore, venueName, broadcast }],
+// recent newest-first, upcoming soonest-first.
+export async function fetchEspnEplTeamSchedule(espnTeamId){
+  const normalize = event => {
+    const comp = event.competitions && event.competitions[0];
+    const competitors = (comp && comp.competitors) || [];
+    const self = competitors.find(c => c.team && String(c.team.id) === String(espnTeamId));
+    const opponent = competitors.find(c => c.team && String(c.team.id) !== String(espnTeamId));
+    if(!self || !opponent) return null;
+    const statusType = comp.status && comp.status.type;
+    const broadcast = comp.broadcasts && comp.broadcasts[0];
+    return {
+      id: event.id,
+      date: event.date,
+      completed: !!(statusType && statusType.completed),
+      statusDetail: statusType ? statusType.shortDetail : null,
+      isHome: self.homeAway === 'home',
+      opponentName: espnTeamName(opponent.team),
+      opponentLogoUrl: espnLogoUrl(opponent.team),
+      ownScore: self.score ? Number(self.score.displayValue) : null,
+      oppScore: opponent.score ? Number(opponent.score.displayValue) : null,
+      venueName: comp.venue ? comp.venue.fullName : null,
+      broadcast: broadcast && broadcast.media ? broadcast.media.shortName : null
+    };
+  };
+
+  const [recentData, upcomingData] = await Promise.all([
+    fetchEspnJSON(`/apis/site/v2/sports/soccer/eng.1/teams/${espnTeamId}/schedule`),
+    fetchEspnJSON(`/apis/site/v2/sports/soccer/eng.1/teams/${espnTeamId}/schedule?fixture=true`)
+  ]);
+  const recent = ((recentData && recentData.events) || []).map(normalize).filter(Boolean);
+  const upcoming = ((upcomingData && upcomingData.events) || []).map(normalize).filter(Boolean);
+  recent.sort((a, b) => new Date(b.date) - new Date(a.date));
+  upcoming.sort((a, b) => new Date(a.date) - new Date(b.date));
+  return { recent, upcoming };
 }

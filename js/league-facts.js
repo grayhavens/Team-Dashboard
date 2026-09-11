@@ -25,9 +25,9 @@
    per-team ACHIEVEMENTS_KEY checklist below.
    ============================================================ */
 import { TEAM_META, LEAGUE_SCORING, LEAGUES, DRAFT_TEAMS } from './data.js';
-import { fetchJSON, CLOSE_ICON_SVG, CHECK_ICON_SVG, lockBodyScroll, findDraftedTeamByName } from './utils.js';
+import { fetchJSON, CLOSE_ICON_SVG, CHECK_ICON_SVG, CHEVRON_ICON_SVG, lockBodyScroll } from './utils.js';
 import { DASHBOARD_WORKER_BASE } from './api.js';
-import { eplStandingsCache } from './standings-epl.js';
+import { eplStandingsCache, findEplTeamKeyByEspnName } from './standings-epl.js';
 import { renderStandings } from './board.js';
 
 const ACHIEVEMENTS_KEY = 'teamDashboardAchievements';
@@ -181,10 +181,10 @@ export function getLeagueRuleTeams(leagueKey, rule){
     const total = table.length;
     return table
       .filter(row => {
-        const rank = parseInt(row.intRank, 10);
+        const rank = row.rank;
         return rule.rankAuto.bottom ? rank > total - rule.rankAuto.bottom : rank === rule.rankAuto.rank;
       })
-      .map(row => findDraftedTeamByName(leagueKey, row.strTeam))
+      .map(row => findEplTeamKeyByEspnName(row.teamName))
       .filter(Boolean);
   }
   return currentLeagueFacts(leagueKey)[rule.label] || [];
@@ -232,6 +232,21 @@ function renderLeagueResultsModal(leagueKey){
   if(list) list.innerHTML = rowsHtml;
 }
 
+// Which team's tracker body (the checklist itself, below the always-
+// visible "Earned so far" summary) is expanded — at most one at a time,
+// same within-session-only idea as obExpandedId in js/overall.js. Only
+// one team modal can be open at once, so tracking a single teamKey
+// (rather than a Set) is enough: opening a different team's modal
+// naturally starts collapsed, since trackerExpandedTeamKey won't match
+// its teamKey.
+let trackerExpandedTeamKey = null;
+
+export function toggleTrackerSection(teamKey){
+  trackerExpandedTeamKey = trackerExpandedTeamKey === teamKey ? null : teamKey;
+  renderTrackerSection(teamKey);
+}
+window.toggleTrackerSection = toggleTrackerSection;
+
 export function toggleAchievementByIndex(teamKey, ruleIndex){
   const meta = TEAM_META[teamKey];
   const scoring = meta && LEAGUE_SCORING[meta.leagueKey];
@@ -274,11 +289,29 @@ function computeTeamProvisionalPoints(teamKey){
   return scoring.rules.reduce((sum, r) => sum + (r.rankAuto && getLeagueRuleTeams(meta.leagueKey, r).includes(teamKey) ? r.pts : 0), 0);
 }
 
+// Header row shown whether the tracker is collapsed or expanded: the
+// "Track This Season" title and the "Earned so far" summary stay
+// visible either way, with a chevron (flipped via CSS when expanded)
+// as the only visual cue that there's more underneath. Clicking
+// anywhere on the row toggles it, not just the chevron itself.
+function trackerHeadHtml(teamKey, totalHtml, expanded){
+  return `
+    <div class="tracker-head" onclick="toggleTrackerSection('${teamKey}')">
+      <div>
+        <div class="modal-section-title">Track This Season</div>
+        <div class="tracker-total">${totalHtml}</div>
+      </div>
+      <div class="tracker-chevron ${expanded ? 'open' : ''}">${CHEVRON_ICON_SVG}</div>
+    </div>
+  `;
+}
+
 export function trackerSectionHtml(teamKey){
   const meta = TEAM_META[teamKey];
   const scoring = meta && LEAGUE_SCORING[meta.leagueKey];
   if(!scoring) return '';
 
+  const expanded = trackerExpandedTeamKey === teamKey;
   const total = computeTeamPoints(teamKey);
 
   // Facts-based leagues are marked from the Standings tab now (see
@@ -313,12 +346,14 @@ export function trackerSectionHtml(teamKey){
       ? `<span class="provisional-note">${provisionalPts >= 0 ? '+' : ''}${provisionalPts} provisional</span>`
       : '';
 
-    return `
-      <div class="modal-section-title">Track This Season</div>
-      <div class="tracker-total">Earned so far: <b>${confirmedPts >= 0 ? '+' : ''}${confirmedPts}</b> pt${Math.abs(confirmedPts) === 1 ? '' : 's'}${provisionalNoteHtml}</div>
-      <div class="tracker-list">${itemsHtml}</div>
-      <button class="tracker-manage-link" onclick="openLeagueResultsModal('${meta.leagueKey}');">Marked from Results &rarr;</button>
-    `;
+    const totalHtml = `Earned so far: <b>${confirmedPts >= 0 ? '+' : ''}${confirmedPts}</b> pt${Math.abs(confirmedPts) === 1 ? '' : 's'}${provisionalNoteHtml}`;
+    const bodyHtml = expanded ? `
+      <div class="tracker-body">
+        <div class="tracker-list">${itemsHtml}</div>
+        <button class="tracker-manage-link" onclick="openLeagueResultsModal('${meta.leagueKey}');">Marked from Results &rarr;</button>
+      </div>
+    ` : '';
+    return trackerHeadHtml(teamKey, totalHtml, expanded) + bodyHtml;
   }
 
   const itemsHtml = scoring.rules.map((r, i) => {
@@ -332,11 +367,9 @@ export function trackerSectionHtml(teamKey){
     `;
   }).join('');
 
-  return `
-    <div class="modal-section-title">Track This Season</div>
-    <div class="tracker-total">Earned so far: <b>${total >= 0 ? '+' : ''}${total}</b> pt${Math.abs(total) === 1 ? '' : 's'}</div>
-    <div class="tracker-list">${itemsHtml}</div>
-  `;
+  const totalHtml = `Earned so far: <b>${total >= 0 ? '+' : ''}${total}</b> pt${Math.abs(total) === 1 ? '' : 's'}`;
+  const bodyHtml = expanded ? `<div class="tracker-body"><div class="tracker-list">${itemsHtml}</div></div>` : '';
+  return trackerHeadHtml(teamKey, totalHtml, expanded) + bodyHtml;
 }
 
 function renderTrackerSection(teamKey){
