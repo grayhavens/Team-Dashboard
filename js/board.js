@@ -22,10 +22,9 @@ import {
   espnCfbRankingsCache, fetchEspnCfbRankingsCached, loadEspnCfbRankingsCache
 } from './standings-cfb.js';
 import {
-  nflRecordsCache, nflStandingsMode, computeNflDrafterCombined, renderNflByDrafterRow,
+  nflStandingsMode, computeNflDrafterCombined, renderNflByDrafterRow,
   computeNflConferenceStandings, renderNflStandingsRow, renderNflGroupHeader, nflStandingsToggleHtml,
-  fetchNflRecords, loadNflRecordsCache, renderAllNflCardRecords,
-  espnNflStandingsCache, fetchEspnNflStandingsCached, loadEspnNflStandingsCache
+  renderAllNflCardRecords, espnNflStandingsCache, fetchEspnNflStandingsCached, loadEspnNflStandingsCache
 } from './standings-nfl.js';
 import { renderOverallStandings, setObMode } from './overall.js';
 import { loadLiveDataCache, loadTeamInfoCache, renderRowStatus, backgroundRefreshTick, REFRESH_STEP_MS, liveDataCache } from './live-data.js';
@@ -351,38 +350,32 @@ export function renderStandings(){
     }
 
     if(league.key === 'nfl'){
-      // Same split as CFB above: "Conference" now reads ESPN (no more
-      // TheRundown dependency, see js/standings-nfl.js's header
-      // comment), while "Person" still reads TheRundown's records — so
-      // each is gated on its own cache.
+      // Both modes read the same espnNflStandingsCache now — unlike
+      // CFB, where "Person" has to stay on TheRundown (ESPN's CFB
+      // rankings only cover the Top 25, not the full roster combined
+      // win% needs), ESPN's NFL standings already cover all 32 teams,
+      // so there's no coverage gap keeping "Person" on a separate,
+      // metered source here. See js/standings-nfl.js's header comment.
       let bodyHtml;
-      if(nflStandingsMode === 'byDrafter'){
-        if(nflRecordsCache.byTeamId){
-          const rowsHtml = computeNflDrafterCombined().map((row, i) => renderNflByDrafterRow(row, i + 1)).join('');
-          bodyHtml = nflStandingsToggleHtml() + rowsHtml;
-          fetchNflRecords(); // no-op if already fresh; quietly refreshes in the background if stale
-        } else if(nflRecordsCache.error){
-          bodyHtml = `<div class="no-live-note">No data available.</div>`;
+      if(espnNflStandingsCache.rows){
+        let rowsHtml;
+        if(nflStandingsMode === 'byDrafter'){
+          rowsHtml = computeNflDrafterCombined().map((row, i) => renderNflByDrafterRow(row, i + 1)).join('');
         } else {
-          fetchNflRecords();
-          bodyHtml = `<div class="loading-note">Loading standings…</div>`;
-        }
-      } else {
-        if(espnNflStandingsCache.rows){
           const conferences = computeNflConferenceStandings();
-          const rowsHtml = conferences.length
+          rowsHtml = conferences.length
             ? conferences.map(conf =>
                 renderNflGroupHeader(conf.name) + conf.teams.map((t, i) => renderNflStandingsRow(t, i + 1)).join('')
               ).join('')
             : `<div class="no-live-note">No teams currently reporting.</div>`;
-          bodyHtml = nflStandingsToggleHtml() + rowsHtml;
-          fetchEspnNflStandingsCached(); // no-op if already fresh; quietly refreshes in the background if stale
-        } else if(espnNflStandingsCache.error){
-          bodyHtml = `<div class="no-live-note">No data available.</div>`;
-        } else {
-          fetchEspnNflStandingsCached();
-          bodyHtml = `<div class="loading-note">Loading standings…</div>`;
         }
+        bodyHtml = nflStandingsToggleHtml() + rowsHtml;
+        fetchEspnNflStandingsCached(); // no-op if already fresh; quietly refreshes in the background if stale
+      } else if(espnNflStandingsCache.error){
+        bodyHtml = `<div class="no-live-note">No data available.</div>`;
+      } else {
+        fetchEspnNflStandingsCached();
+        bodyHtml = `<div class="loading-note">Loading standings…</div>`;
       }
       return leagueBlockHtml(league, bodyHtml);
     }
@@ -417,7 +410,6 @@ loadLiveDataCache();
 loadEplStandingsCache();
 loadCfbRecordsCache();
 loadEspnCfbRankingsCache();
-loadNflRecordsCache();
 loadEspnNflStandingsCache();
 loadTeamInfoCache();
 renderBoard();
@@ -432,7 +424,7 @@ applyUrlState();
 // records aren't stuck waiting on that.
 fetchCfbRecords();
 fetchEplStandingsTable();
-fetchNflRecords();
+fetchEspnNflStandingsCached();
 
 backgroundRefreshTick();
 setInterval(backgroundRefreshTick, REFRESH_STEP_MS);

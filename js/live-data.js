@@ -8,7 +8,7 @@ import { fetchJSON, ordinal, formatKickoff, formatUpdatedAt, teamBadgeHtml, lock
 import { API_BASE, fetchRundownEventForTeam, isRundownEventLive, V2_MIGRATED_LEAGUES, UPCOMING_CHIP_LEAGUES, fetchSportsDbV2Team, fetchSportsDbV2Schedule } from './api.js';
 import { eplStandingsCache, fetchEplStandingsTable } from './standings-epl.js';
 import { cfbRecordsCache } from './standings-cfb.js';
-import { nflRecordsCache, parseNflRecord } from './standings-nfl.js';
+import { findEspnNflRow } from './standings-nfl.js';
 import { trackerSectionHtml } from './league-facts.js';
 
 const LIVE_DATA_CACHE_KEY = 'teamDashboardLiveDataCache';
@@ -205,18 +205,20 @@ export function renderStats(meta, bundle){
     }
   }
 
-  // NFL: same TheRundown team-list source as CFB above (see
-  // fetchNflRecords/renderNflCardRecord in js/standings-nfl.js), but
-  // this one carries a real division too, so that's shown instead of
-  // an AP-style rank the NFL doesn't have.
+  // NFL: same ESPN standings source the Standings tab reads (see
+  // findEspnNflRow/nflRecordLabel in js/standings-nfl.js) — this used
+  // to read TheRundown's per-team division field instead, which could
+  // (and did) drift from what the Standings tab showed once that moved
+  // to ESPN. "Conference" here, not "Division", for the same reason the
+  // Standings tab's toggle was relabeled — ESPN's simple standings
+  // endpoint doesn't have real division data, only conference.
   if(meta.leagueKey === 'nfl'){
-    const rec = meta.rundownTeamId ? (nflRecordsCache.byTeamId || {})[meta.rundownTeamId] : null;
-    if(rec && rec.record){
-      const parsed = parseNflRecord(rec.record);
-      const recordLabel = parsed ? `${parsed.wins}-${parsed.losses}${parsed.ties ? '-' + parsed.ties : ''}` : rec.record;
+    const row = findEspnNflRow(meta);
+    if(row){
+      const recordLabel = `${row.wins}-${row.losses}${row.ties ? '-' + row.ties : ''}`;
       el.innerHTML = `
         <div class="stat-cell"><div class="num">${recordLabel}</div><div class="lbl">Record</div></div>
-        <div class="stat-cell"><div class="num" style="font-size:14px;">${(rec.division && rec.division.name) || '—'}</div><div class="lbl">Division</div></div>
+        <div class="stat-cell"><div class="num" style="font-size:14px;">${row.conferenceAbbr || '—'}</div><div class="lbl">Conference</div></div>
       `;
       return;
     }
