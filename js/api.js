@@ -158,22 +158,26 @@ export async function fetchRundownEventForTeam(meta){
 // populating for these teams. Remove this list entirely (and the V1
 // branch it feeds) once every league has migrated — Phase 4.
 //
-// IMPORTANT — this only matters for NFL/NBA/NHL/MLB/WNBA/College BB,
-// the leagues still on V1 from before the premium key existed. Any
-// LEAGUE ADDED FROM NOW ON must be wired straight onto V2 (added here
+// IMPORTANT — this only matters for NBA/NHL/MLB/WNBA/College BB, the
+// leagues still on V1 from before the premium key existed. Any LEAGUE
+// ADDED FROM NOW ON must be wired straight onto V2 (added here
 // immediately, never left on the V1 branch to "migrate later")
 // — we're paying for the premium SportsDB key specifically so new
 // integrations don't inherit V1's free-tier CORS breakage (the exact
 // bug that left CFB's Last Result/Next Game blank until this migration).
-export const V2_MIGRATED_LEAGUES = ['epl', 'cfb'];
+// NFL followed the same pilot-then-batch approach CFB used: piloted on
+// Detroit/Pittsburgh/Miami, confirmed real results/fixtures came back
+// in the same shape, then the rest of the roster followed.
+export const V2_MIGRATED_LEAGUES = ['epl', 'cfb', 'nfl'];
 
 // Leagues whose board row pill shows the next match ("Upcoming") instead
 // of the last result — CFB and EPL teams often sit idle between games
 // for a week or more, so the nightly-slate leagues' "last result, or
 // today's game if there is one" pill isn't as useful here as always
 // showing what's next. See renderRowStatus in js/live-data.js and the
-// "Upcoming" header label in js/board.js.
-export const UPCOMING_CHIP_LEAGUES = ['epl', 'cfb'];
+// "Upcoming" header label in js/board.js. NFL is the same once-a-week
+// cadence as CFB, so it gets the same treatment.
+export const UPCOMING_CHIP_LEAGUES = ['epl', 'cfb', 'nfl'];
 
 // V2's team-lookup response is shaped { lookup: [...] } and its
 // schedule responses are { schedule: [...] } — normalized here into

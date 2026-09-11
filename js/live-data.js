@@ -8,6 +8,7 @@ import { fetchJSON, ordinal, formatKickoff, formatUpdatedAt, teamBadgeHtml, lock
 import { API_BASE, fetchRundownEventForTeam, isRundownEventLive, V2_MIGRATED_LEAGUES, UPCOMING_CHIP_LEAGUES, fetchSportsDbV2Team, fetchSportsDbV2Schedule } from './api.js';
 import { eplStandingsCache, fetchEplStandingsTable } from './standings-epl.js';
 import { cfbRecordsCache } from './standings-cfb.js';
+import { nflRecordsCache, parseNflRecord } from './standings-nfl.js';
 import { trackerSectionHtml } from './league-facts.js';
 
 const LIVE_DATA_CACHE_KEY = 'teamDashboardLiveDataCache';
@@ -199,6 +200,23 @@ export function renderStats(meta, bundle){
       el.innerHTML = `
         <div class="stat-cell"><div class="num">${rec.record}</div><div class="lbl">Record</div></div>
         <div class="stat-cell"><div class="num">${typeof rec.ranking === 'number' ? '#' + rec.ranking : 'NR'}</div><div class="lbl">AP Rank</div></div>
+      `;
+      return;
+    }
+  }
+
+  // NFL: same TheRundown team-list source as CFB above (see
+  // fetchNflRecords/renderNflCardRecord in js/standings-nfl.js), but
+  // this one carries a real division too, so that's shown instead of
+  // an AP-style rank the NFL doesn't have.
+  if(meta.leagueKey === 'nfl'){
+    const rec = meta.rundownTeamId ? (nflRecordsCache.byTeamId || {})[meta.rundownTeamId] : null;
+    if(rec && rec.record){
+      const parsed = parseNflRecord(rec.record);
+      const recordLabel = parsed ? `${parsed.wins}-${parsed.losses}${parsed.ties ? '-' + parsed.ties : ''}` : rec.record;
+      el.innerHTML = `
+        <div class="stat-cell"><div class="num">${recordLabel}</div><div class="lbl">Record</div></div>
+        <div class="stat-cell"><div class="num" style="font-size:14px;">${(rec.division && rec.division.name) || '—'}</div><div class="lbl">Division</div></div>
       `;
       return;
     }
