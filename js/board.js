@@ -18,7 +18,8 @@ import {
 import {
   cfbRecordsCache, cfbStandingsMode, computeCfbDrafterCombined, renderCfbByDrafterRow,
   computeCfbRankingTable, renderCfbRankingRow, cfbStandingsToggleHtml, fetchCfbRecords,
-  loadCfbRecordsCache, renderAllCfbCardRecords
+  loadCfbRecordsCache, renderAllCfbCardRecords,
+  espnCfbRankingsCache, fetchEspnCfbRankingsCached, loadEspnCfbRankingsCache
 } from './standings-cfb.js';
 import {
   nflRecordsCache, nflStandingsMode, computeNflDrafterCombined, renderNflByDrafterRow,
@@ -313,24 +314,37 @@ export function renderStandings(){
     }
 
     if(league.key === 'cfb'){
+      // Each mode now has its own data source — the AP Top 25 moved to
+      // ESPN (no more TheRundown dependency, see js/standings-cfb.js's
+      // header comment), while "Person" (combined win%) still reads
+      // TheRundown's records — so each is gated on its own cache rather
+      // than the one shared check this used before.
       let bodyHtml;
-      if(cfbRecordsCache.byTeamId){
-        let rowsHtml;
-        if(cfbStandingsMode === 'byDrafter'){
-          rowsHtml = computeCfbDrafterCombined().map((row, i) => renderCfbByDrafterRow(row, i + 1)).join('');
+      if(cfbStandingsMode === 'byDrafter'){
+        if(cfbRecordsCache.byTeamId){
+          const rowsHtml = computeCfbDrafterCombined().map((row, i) => renderCfbByDrafterRow(row, i + 1)).join('');
+          bodyHtml = cfbStandingsToggleHtml() + rowsHtml;
+          fetchCfbRecords(); // no-op if already fresh; quietly refreshes in the background if stale
+        } else if(cfbRecordsCache.error){
+          bodyHtml = `<div class="no-live-note">No data available.</div>`;
         } else {
-          const rankingRows = computeCfbRankingTable();
-          rowsHtml = rankingRows.length
-            ? rankingRows.map(team => renderCfbRankingRow(team)).join('')
-            : `<div class="no-live-note">No teams currently ranked.</div>`;
+          fetchCfbRecords();
+          bodyHtml = `<div class="loading-note">Loading standings…</div>`;
         }
-        bodyHtml = cfbStandingsToggleHtml() + rowsHtml;
-        fetchCfbRecords(); // no-op if already fresh; quietly refreshes in the background if stale
-      } else if(cfbRecordsCache.error){
-        bodyHtml = `<div class="no-live-note">No data available.</div>`;
       } else {
-        fetchCfbRecords();
-        bodyHtml = `<div class="loading-note">Loading standings…</div>`;
+        if(espnCfbRankingsCache.ranks){
+          const rankingRows = computeCfbRankingTable();
+          const rowsHtml = rankingRows.length
+            ? rankingRows.map(rank => renderCfbRankingRow(rank)).join('')
+            : `<div class="no-live-note">No teams currently ranked.</div>`;
+          bodyHtml = cfbStandingsToggleHtml() + rowsHtml;
+          fetchEspnCfbRankingsCached(); // no-op if already fresh; quietly refreshes in the background if stale
+        } else if(espnCfbRankingsCache.error){
+          bodyHtml = `<div class="no-live-note">No data available.</div>`;
+        } else {
+          fetchEspnCfbRankingsCached();
+          bodyHtml = `<div class="loading-note">Loading standings…</div>`;
+        }
       }
       return leagueBlockHtml(league, bodyHtml);
     }
@@ -389,6 +403,7 @@ LEAGUE_FACTS_LEAGUES.forEach(migrateAchievementsToFacts);
 loadLiveDataCache();
 loadEplStandingsCache();
 loadCfbRecordsCache();
+loadEspnCfbRankingsCache();
 loadNflRecordsCache();
 loadTeamInfoCache();
 renderBoard();
