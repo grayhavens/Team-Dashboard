@@ -12,11 +12,24 @@
    ("10-7") and, for the current Top 25, a "ranking" field per team.
    One shared fetch for the whole league (mirrors eplStandingsCache:
    one call, not one per team), reusing the existing /teams/{sportId}
-   worker route.
+   worker route. This still backs the "Person" (combined win%) view.
+
+   The AP Top 25 view itself (below, computeCfbRankingTable/
+   renderCfbRankingRow) has moved OFF TheRundown and onto ESPN's hidden
+   API (js/espn.js) instead — see docs/espn-migration-plan.md's Phase 2.
+   Why: TheRundown's daily data-point budget is shared across all 8
+   leagues and can (did, on 2026-09-11) run out entirely, taking the
+   ranking view down along with everything else on it; ESPN's endpoint
+   has no key and no observed limit, and is CORS-open, so it's fetched
+   directly here — no worker proxy needed, unlike everything else in
+   this file. Its ranked-team records come from ESPN too (not
+   cfbRecordsCache below), so the ranking view keeps working even during
+   a TheRundown outage like today's.
    ============================================================ */
 import { LEAGUES, TEAM_META, DRAFT_TEAMS, LEAGUE_SCORING } from './data.js';
-import { fetchJSON, findDraftedTeamByRundownId, teamBadgeHtml, abbrFromName } from './utils.js';
+import { fetchJSON, teamBadgeHtml, abbrFromName } from './utils.js';
 import { DASHBOARD_WORKER_BASE, RUNDOWN_SPORT_ID } from './api.js';
+import { fetchEspnCfbRankings } from './espn.js';
 import { renderStandings } from './board.js';
 import { liveDataCache, renderStats } from './live-data.js';
 
@@ -119,24 +132,92 @@ export function renderAllCfbCardRecords(){
   LEAGUES.find(l => l.key === 'cfb').teams.forEach(renderCfbCardRecord);
 }
 
-// TheRundown's /sports/{sportId}/teams response — the exact same
-// payload already fetched above for win-loss records — carries a
-// "ranking" field per team (1-25 for the current Top 25, absent
-// entirely for every unranked team). No extra request needed: this
-// just reads a field cfbRecordsCache.byTeamId was already discarding.
-export function computeCfbRankingTable(){
-  const byTeamId = cfbRecordsCache.byTeamId || {};
-  return Object.values(byTeamId)
-    .filter(t => typeof t.ranking === 'number' && t.ranking >= 1 && t.ranking <= 25)
-    .sort((a, b) => a.ranking - b.ranking);
+// ---- AP Top 25 (ESPN-sourced — see the file header comment) ----
+
+const ESPN_CFB_RANKINGS_CACHE_KEY = 'teamDashboardEspnCfbRankingsCache';
+// The AP poll only moves once a week (after Saturday's games), so this
+// could be much longer than an hour — matched to CFB_RECORDS_TTL_MS
+// below anyway, since "how fresh does this need to be" mattering less
+// than "keep every cache in this file on one predictable rhythm".
+const ESPN_CFB_RANKINGS_TTL_MS = 60 * 60 * 1000;
+export const espnCfbRankingsCache = { ranks: null, error: false, loading: false, fetchedAt: null };
+let espnCfbRankingsPromise = null;
+
+function espnCfbRankingsIsFresh(){
+  return !!espnCfbRankingsCache.ranks && !!espnCfbRankingsCache.fetchedAt && (Date.now() - espnCfbRankingsCache.fetchedAt) < ESPN_CFB_RANKINGS_TTL_MS;
 }
 
-export function renderCfbRankingRow(team){
-  const teamKey = findDraftedTeamByRundownId('cfb', team.team_id);
+function saveEspnCfbRankingsCache(){
+  try { localStorage.setItem(ESPN_CFB_RANKINGS_CACHE_KEY, JSON.stringify(espnCfbRankingsCache)); } catch (e){}
+}
+
+export function loadEspnCfbRankingsCache(){
+  try {
+    const raw = localStorage.getItem(ESPN_CFB_RANKINGS_CACHE_KEY);
+    if(!raw) return;
+    const parsed = JSON.parse(raw);
+    if(parsed && parsed.ranks){
+      espnCfbRankingsCache.ranks = parsed.ranks;
+      espnCfbRankingsCache.fetchedAt = parsed.fetchedAt || null;
+    }
+  } catch (e){}
+}
+
+export function fetchEspnCfbRankingsCached(){
+  if(espnCfbRankingsCache.loading) return espnCfbRankingsPromise;
+  if(espnCfbRankingsIsFresh()) return Promise.resolve();
+
+  espnCfbRankingsCache.loading = true;
+  espnCfbRankingsPromise = (async () => {
+    const ranks = await fetchEspnCfbRankings();
+    espnCfbRankingsCache.loading = false;
+    if(ranks && ranks.length){
+      espnCfbRankingsCache.ranks = ranks;
+      espnCfbRankingsCache.error = false;
+      espnCfbRankingsCache.fetchedAt = Date.now();
+      saveEspnCfbRankingsCache();
+    } else if(!espnCfbRankingsCache.ranks){
+      // Same "don't blank out a good cache on a transient miss" rule as
+      // cfbRecordsCache/fetchEplStandingsTable.
+      espnCfbRankingsCache.error = true;
+    }
+    renderStandings();
+  })();
+  return espnCfbRankingsPromise;
+}
+
+// A ranked team's ESPN "location" (e.g. "Indiana") is compared against
+// this app's own TEAM_META[...].name (e.g. "IU") to find a drafted
+// match — most are verbatim-identical (see docs/espn-migration-plan.md's
+// Pilot Results), but a handful aren't, so those get a manual override
+// here rather than a fuzzier auto-match that could mis-pair two
+// different schools.
+const CFB_ESPN_NAME_OVERRIDES = {
+  'Indiana': 'IU'
+};
+
+function normalizeTeamName(s){
+  return (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function findCfbTeamKeyByEspnLocation(location){
+  const wanted = normalizeTeamName(CFB_ESPN_NAME_OVERRIDES[location] || location);
+  const teams = LEAGUES.find(l => l.key === 'cfb').teams;
+  return teams.find(teamKey => normalizeTeamName(TEAM_META[teamKey].name) === wanted) || null;
+}
+
+// ranks is already sorted 1-25 by ESPN — nothing left to compute here,
+// this just exists so board.js doesn't need to know the cache's shape.
+export function computeCfbRankingTable(){
+  return espnCfbRankingsCache.ranks || [];
+}
+
+export function renderCfbRankingRow(rank){
+  const teamKey = findCfbTeamKeyByEspnLocation(rank.location);
   const meta = teamKey ? TEAM_META[teamKey] : {
-    name: team.name,
+    name: rank.teamName,
     badgeStyle: 'background: rgba(255,255,255,0.08); color: var(--text-sub); border-color: var(--hairline-strong);',
-    badgeText: abbrFromName(team.name),
+    badgeText: abbrFromName(rank.teamName),
     badgeUrl: null
   };
   const draftedByHtml = teamKey
@@ -145,11 +226,11 @@ export function renderCfbRankingRow(team){
 
   return `
     <div class="standings-row ${teamKey ? 'clickable' : ''}" ${teamKey ? `onclick="openTeamModal('${teamKey}')"` : ''}>
-      <div class="standings-rank">${team.ranking}</div>
+      <div class="standings-rank">${rank.rank}</div>
       ${teamBadgeHtml(meta)}
       <div class="team-main">
         <div class="team-name">${meta.name}</div>
-        <div class="team-sub">${team.record || ''}</div>
+        <div class="team-sub">${rank.record || ''}</div>
       </div>
       ${draftedByHtml}
     </div>
