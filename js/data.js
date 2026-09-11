@@ -307,7 +307,7 @@ export const LEAGUE_SCORING = {
       { label: 'Make the playoffs', pts: 1 },
       { label: 'Division title', pts: 2 },
       { label: 'Best record in conference', pts: 3 },
-      { label: 'Make conference finals', pts: 2 },
+      { label: 'Make conference championship', pts: 2 },
       { label: 'Make Super Bowl', pts: 3 },
       { label: 'Win Super Bowl', pts: 5 },
       { label: 'Last place in division', pts: -2 },

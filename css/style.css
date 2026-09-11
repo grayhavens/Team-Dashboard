@@ -178,12 +178,14 @@ body{
   gap: 10px;
 }
 
-/* Standings-only header layout: title + season share a top line (the
-   title can run long, e.g. "English Premier League", so the season
-   is top-aligned rather than centered against however many lines that
-   wraps to), and the Scoring/Results chips get their own line below
-   instead of squeezing onto the same row — see leagueBlockHtml in
-   js/board.js. */
+/* Standings-only header layout: the title gets its own top line (it
+   can run long, e.g. "English Premier League"), and the season sits
+   on the second line alongside the Scoring/Results chips instead of
+   next to the title — same fix as the Teams-tab header (see
+   .league-tab.board-league-tab above): a small/muted .n label paired
+   with the bold title line read as mismatched, so it moved down to
+   share a line with something the same size/weight instead — see
+   leagueBlockHtml in js/board.js. */
 .league-tab.standings-league-tab{
   flex-direction: column;
   align-items: stretch;
@@ -200,16 +202,30 @@ body{
 .league-tab-chips{
   display:flex;
   align-items:center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+/* Scoring + Results grouped together so space-between above only
+   splits "chips" from "season" — without this wrapper, a league with
+   both chips gave space-between three items to spread out, which
+   pushed Results away from Scoring into the middle of the row instead
+   of keeping the two chips together on the left. */
+.league-tab-chips-left{
+  display:flex;
+  align-items:center;
   gap: 8px;
 }
 
 /* Teams-tab header layout: title with the season directly beneath it
    on the left (wraps onto a second line for the longer league names,
    e.g. "National Football League"), the Upcoming/Last Result column
-   label on its own on the right, top-aligned against the title — see
-   renderBoard in js/board.js. */
+   label on its own on the right — bottom-aligned against the season
+   line (both small/muted .n text) rather than the bold title line, so
+   it doesn't read as paired with the title despite the size/weight
+   mismatch — see renderBoard in js/board.js. */
 .league-tab.board-league-tab{
-  align-items: flex-start;
+  align-items: flex-end;
 }
 
 .board-league-tab .league-tab-left{
@@ -988,6 +1004,14 @@ body{
   gap: 6px;
   padding: 12px 18px;
   border-bottom: 1px solid var(--hairline);
+}
+
+/* NFL's second toggle row (Divisions/Full Conference), stacked right
+   under the first (AFC/NFC/Person) — pulled closer so the pair reads as
+   one nested choice ("which conference, then how to view it") instead
+   of two unrelated toggle bars. */
+.standings-subtoggle{
+  padding-top: 0;
 }
 
 .toggle-btn{

@@ -22,9 +22,10 @@ import {
   espnCfbRankingsCache, fetchEspnCfbRankingsCached, loadEspnCfbRankingsCache
 } from './standings-cfb.js';
 import {
-  nflStandingsMode, computeNflDrafterCombined, renderNflByDrafterRow,
-  computeNflConferenceStandings, renderNflStandingsRow, renderNflGroupHeader, nflStandingsToggleHtml,
-  renderAllNflCardRecords, espnNflStandingsCache, fetchEspnNflStandingsCached, loadEspnNflStandingsCache
+  nflStandingsMode, nflConferenceSubMode, computeNflDrafterCombined, renderNflByDrafterRow,
+  computeNflDivisionStandings, computeNflConferenceStandings, renderNflStandingsRow, renderNflGroupHeader,
+  nflStandingsToggleHtml, renderAllNflCardRecords, espnNflStandingsCache, fetchEspnNflStandingsCached,
+  loadEspnNflStandingsCache, espnNflDivisionCache, fetchEspnNflDivisionStandingsCached, loadEspnNflDivisionCache
 } from './standings-nfl.js';
 import { renderOverallStandings, setObMode } from './overall.js';
 import { loadLiveDataCache, loadTeamInfoCache, renderRowStatus, backgroundRefreshTick, REFRESH_STEP_MS, liveDataCache } from './live-data.js';
@@ -257,11 +258,13 @@ function leagueBlockHtml(league, bodyHtml){
       <div class="league-tab standings-league-tab">
         <div class="league-tab-top">
           <div class="league-tab-left">${headerLabel}</div>
-          <span class="n">${league.season}</span>
         </div>
         <div class="league-tab-chips">
-          <div class="scoring-chip" onclick="openLeagueModal('${league.key}')">Scoring</div>
-          ${resultsChipHtml}
+          <div class="league-tab-chips-left">
+            <div class="scoring-chip" onclick="openLeagueModal('${league.key}')">Scoring</div>
+            ${resultsChipHtml}
+          </div>
+          <span class="n">${league.season}</span>
         </div>
       </div>
       ${bodyHtml}
@@ -350,32 +353,53 @@ export function renderStandings(){
     }
 
     if(league.key === 'nfl'){
-      // Both modes read the same espnNflStandingsCache now — unlike
-      // CFB, where "Person" has to stay on TheRundown (ESPN's CFB
-      // rankings only cover the Top 25, not the full roster combined
-      // win% needs), ESPN's NFL standings already cover all 32 teams,
-      // so there's no coverage gap keeping "Person" on a separate,
-      // metered source here. See js/standings-nfl.js's header comment.
+      // Nested: pick AFC/NFC/Person first, then (for AFC/NFC) Divisions
+      // vs. that conference's Full ranking — see js/standings-nfl.js's
+      // header comment. "Divisions" reads the much heavier
+      // espnNflDivisionCache (9 requests instead of 1); "Full
+      // Conference" and "Person" both just need a team's own record
+      // with no per-division grouping, so they share the cheap flat
+      // espnNflStandingsCache — this split is about which ESPN cache is
+      // cheap enough for the job, same idea as before, just nested now.
+      const usesDivisionCache = nflStandingsMode !== 'byDrafter' && nflConferenceSubMode === 'division';
       let bodyHtml;
-      if(espnNflStandingsCache.rows){
-        let rowsHtml;
-        if(nflStandingsMode === 'byDrafter'){
-          rowsHtml = computeNflDrafterCombined().map((row, i) => renderNflByDrafterRow(row, i + 1)).join('');
-        } else {
-          const conferences = computeNflConferenceStandings();
-          rowsHtml = conferences.length
-            ? conferences.map(conf =>
-                renderNflGroupHeader(conf.name) + conf.teams.map((t, i) => renderNflStandingsRow(t, i + 1)).join('')
+      if(usesDivisionCache){
+        const conferenceAbbr = nflStandingsMode.toUpperCase();
+        if(espnNflDivisionCache.divisions){
+          const divisions = computeNflDivisionStandings(conferenceAbbr);
+          const rowsHtml = divisions.length
+            ? divisions.map(div =>
+                renderNflGroupHeader(div.name) + div.teams.map((t, i) => renderNflStandingsRow(t, i + 1)).join('')
               ).join('')
             : `<div class="no-live-note">No teams currently reporting.</div>`;
+          bodyHtml = nflStandingsToggleHtml() + rowsHtml;
+          fetchEspnNflDivisionStandingsCached(); // no-op if already fresh; quietly refreshes in the background if stale
+        } else if(espnNflDivisionCache.error){
+          bodyHtml = `<div class="no-live-note">No data available.</div>`;
+        } else {
+          fetchEspnNflDivisionStandingsCached();
+          bodyHtml = `<div class="loading-note">Loading standings…</div>`;
         }
-        bodyHtml = nflStandingsToggleHtml() + rowsHtml;
-        fetchEspnNflStandingsCached(); // no-op if already fresh; quietly refreshes in the background if stale
-      } else if(espnNflStandingsCache.error){
-        bodyHtml = `<div class="no-live-note">No data available.</div>`;
       } else {
-        fetchEspnNflStandingsCached();
-        bodyHtml = `<div class="loading-note">Loading standings…</div>`;
+        if(espnNflStandingsCache.rows){
+          let rowsHtml;
+          if(nflStandingsMode === 'byDrafter'){
+            rowsHtml = computeNflDrafterCombined().map((row, i) => renderNflByDrafterRow(row, i + 1)).join('');
+          } else {
+            const conferenceAbbr = nflStandingsMode.toUpperCase();
+            const teams = computeNflConferenceStandings(conferenceAbbr);
+            rowsHtml = teams.length
+              ? teams.map((t, i) => renderNflStandingsRow(t, i + 1)).join('')
+              : `<div class="no-live-note">No teams currently reporting.</div>`;
+          }
+          bodyHtml = nflStandingsToggleHtml() + rowsHtml;
+          fetchEspnNflStandingsCached(); // no-op if already fresh; quietly refreshes in the background if stale
+        } else if(espnNflStandingsCache.error){
+          bodyHtml = `<div class="no-live-note">No data available.</div>`;
+        } else {
+          fetchEspnNflStandingsCached();
+          bodyHtml = `<div class="loading-note">Loading standings…</div>`;
+        }
       }
       return leagueBlockHtml(league, bodyHtml);
     }
@@ -411,6 +435,7 @@ loadEplStandingsCache();
 loadCfbRecordsCache();
 loadEspnCfbRankingsCache();
 loadEspnNflStandingsCache();
+loadEspnNflDivisionCache();
 loadTeamInfoCache();
 renderBoard();
 applyUrlState();
