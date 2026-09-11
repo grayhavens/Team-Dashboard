@@ -178,12 +178,14 @@ body{
   gap: 10px;
 }
 
-/* Standings-only header layout: title + season share a top line (the
-   title can run long, e.g. "English Premier League", so the season
-   is top-aligned rather than centered against however many lines that
-   wraps to), and the Scoring/Results chips get their own line below
-   instead of squeezing onto the same row — see leagueBlockHtml in
-   js/board.js. */
+/* Standings-only header layout: the title gets its own top line (it
+   can run long, e.g. "English Premier League"), and the season sits
+   on the second line alongside the Scoring/Results chips instead of
+   next to the title — same fix as the Teams-tab header (see
+   .league-tab.board-league-tab above): a small/muted .n label paired
+   with the bold title line read as mismatched, so it moved down to
+   share a line with something the same size/weight instead — see
+   leagueBlockHtml in js/board.js. */
 .league-tab.standings-league-tab{
   flex-direction: column;
   align-items: stretch;
@@ -200,6 +202,7 @@ body{
 .league-tab-chips{
   display:flex;
   align-items:center;
+  justify-content: space-between;
   gap: 8px;
 }
 
