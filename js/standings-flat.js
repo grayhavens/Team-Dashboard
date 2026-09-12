@@ -1,11 +1,16 @@
 /* ============================================================
-   Shared engine behind every "flat" (conference/league-grouped, no
-   division nesting) ESPN standings view — NBA, NHL, MLB, and WNBA all
-   follow the identical shape once fetched (see fetchEspnFlatStandings
-   in js/espn.js): pick a conference/league or "Person", nothing more
-   layered than that (unlike NFL's extra Division/Conference
-   sub-toggle, which stays bespoke in js/standings-nfl.js since no
-   other league here has division data wired up yet).
+   Shared engine behind every "flat" (conference/league-grouped) ESPN
+   standings view — NBA, NHL, MLB, and WNBA all follow the identical
+   shape once fetched (see fetchEspnFlatStandings in js/espn.js): pick a
+   conference/league or "Person". NBA/NHL/MLB additionally nest a real
+   Divisions view under each conference (an optional fetchDivisionStandings
+   passed into createFlatStandingsBoard — see js/standings-nba.js/-nhl.js/
+   -mlb.js), same Division-vs-Conference sub-toggle idea NFL pioneered
+   in js/standings-nfl.js, generalized here once 3 of these 4 leagues
+   needed it too. WNBA has no real divisions (a single unified
+   conference table), so it simply omits that option — this board
+   behaves exactly as it did before division support existed for any
+   league that doesn't pass it.
 
    Matching an ESPN row back to a drafted team uses an EXACT match
    (after normalizeTeamName), not the looser substring rule
@@ -35,6 +40,7 @@
 import { LEAGUES, TEAM_META, DRAFT_TEAMS, LEAGUE_SCORING } from './data.js';
 import { normalizeTeamName, teamBadgeHtml, abbrFromName } from './utils.js';
 import { renderStandings } from './board.js';
+import { liveDataCache, renderStats } from './live-data.js';
 
 function findFlatTeamKey(leagueKey, realName){
   const target = normalizeTeamName(realName);
@@ -51,8 +57,17 @@ export function createFlatStandingsBoard(opts){
     combinedInit, // () => fresh per-drafter accumulator, e.g. { wins: 0, losses: 0 }
     combinedAccumulate, // (bucket, row) => void — adds one team's row into a drafter's bucket
     combinedLabel, // (bucket) => "41-30 · .577" style string for the Person view
-    combinedSort // (a, b) => number — orders the Person view (found/not-found already handled)
+    combinedSort, // (a, b) => number — orders the Person view (found/not-found already handled)
+    // Optional — only NBA/NHL/MLB pass this (WNBA has no real divisions
+    // to nest under; see js/standings-wnba.js). () => Promise<[{
+    // division, conferenceAbbr, teams }]> | null, same shape
+    // fetchEspnNbaDivisionStandings/-Nhl-/-Mlb- (js/espn.js) return.
+    // When omitted, this board behaves exactly as it did before division
+    // support existed — no extra cache, no sub-toggle, no per-league
+    // change needed for WNBA.
+    fetchDivisionStandings
   } = opts;
+  const hasDivisions = !!fetchDivisionStandings;
 
   const cache = { rows: null, error: false, loading: false, fetchedAt: null };
   let promise = null;
@@ -139,6 +154,108 @@ export function createFlatStandingsBoard(opts){
   function computeConferenceStandings(confAbbr){
     const rows = (cache.rows || []).filter(row => row.conferenceAbbr === confAbbr);
     return rows.sort(sortConference);
+  }
+
+  // ---- Division standings (optional — only wired up when the caller passed fetchDivisionStandings) ----
+  // Same shape/cadence as espnNflDivisionCache in js/standings-nfl.js,
+  // kept as its own cache (separate from the flat one above) so the
+  // cheap flat data everything else needs (board cards, the modal,
+  // Person) doesn't pay for this heavier fetch every time.
+  const DIVISION_CACHE_KEY = cacheKey + 'Divisions';
+  const divisionCache = { divisions: null, error: false, loading: false, fetchedAt: null };
+  let divisionPromise = null;
+
+  function divisionIsFresh(){
+    return !!divisionCache.divisions && !!divisionCache.fetchedAt && (Date.now() - divisionCache.fetchedAt) < ttlMs;
+  }
+
+  function saveDivisionCache(){
+    try { localStorage.setItem(DIVISION_CACHE_KEY, JSON.stringify(divisionCache)); } catch (e){}
+  }
+
+  function loadDivisionCache(){
+    if(!hasDivisions) return;
+    try {
+      const raw = localStorage.getItem(DIVISION_CACHE_KEY);
+      if(!raw) return;
+      const parsed = JSON.parse(raw);
+      if(parsed && parsed.divisions){
+        divisionCache.divisions = parsed.divisions;
+        divisionCache.fetchedAt = parsed.fetchedAt || null;
+      }
+    } catch (e){}
+  }
+
+  function fetchDivisionCached(){
+    if(!hasDivisions) return Promise.resolve();
+    if(divisionCache.loading) return divisionPromise;
+    if(divisionIsFresh()) return Promise.resolve();
+
+    divisionCache.loading = true;
+    divisionPromise = (async () => {
+      const divisions = await fetchDivisionStandings();
+      divisionCache.loading = false;
+      if(divisions && divisions.length){
+        divisionCache.divisions = divisions;
+        divisionCache.error = false;
+        divisionCache.fetchedAt = Date.now();
+        saveDivisionCache();
+      } else if(!divisionCache.divisions){
+        // Same "don't blank out a good cache on a transient miss" rule
+        // as the flat cache above.
+        divisionCache.error = true;
+      }
+      renderStandings();
+      // The team modal's Division stat cell (js/live-data.js's
+      // renderStats) reads this same cache, and can easily open before
+      // this heavier fetch resolves (it's only triggered on-demand, not
+      // eagerly at boot, since most sessions never open a given team's
+      // modal) — same "activeTeam" re-render used by CFB/EPL/NFL's own
+      // standings fetches for this exact race.
+      const activeTeam = document.getElementById('modal-content').dataset.activeTeam;
+      const activeMeta = activeTeam && TEAM_META[activeTeam];
+      if(activeMeta && activeMeta.leagueKey === leagueKey){
+        renderStats(activeMeta, liveDataCache[activeTeam] || {});
+      }
+    })();
+    return divisionPromise;
+  }
+
+  // conferenceAbbr narrows to that conference's own divisions — reads
+  // the explicit conferenceAbbr field each division carries (set by the
+  // fetcher's own division map in js/espn.js) rather than parsing it
+  // off the division name, since MLB's names collide across leagues
+  // ("AL East"/"NL East" both end in "East").
+  function computeDivisionStandings(conferenceAbbr){
+    const divisions = divisionCache.divisions || [];
+    return divisions
+      .filter(d => d.conferenceAbbr === conferenceAbbr)
+      .map(d => ({ name: d.division, teams: [...d.teams].sort(sortConference) }));
+  }
+
+  // Given a drafted team's own meta, find which division it's in — used
+  // by the team modal's Division stat cell (js/live-data.js). Reverse
+  // direction of computeDivisionStandings, same idea as findRowForMeta
+  // above but walking the (much less frequently needed) division cache
+  // instead of the flat one.
+  function findDivisionForMeta(meta){
+    const divisions = divisionCache.divisions;
+    if(!divisions) return null;
+    const teamKey = teamKeyFor(meta);
+    if(!teamKey) return null;
+    return divisions.find(d => d.teams.some(t => findFlatTeamKey(leagueKey, t.teamNickname) === teamKey)) || null;
+  }
+
+  // shortName (not the possibly-disambiguated `division` field — see
+  // js/espn.js) since the conference is always shown as its own,
+  // separate stat cell right next to this one.
+  function divisionLabel(meta){
+    const div = findDivisionForMeta(meta);
+    return div ? div.shortName : null;
+  }
+
+  function renderGroupHeader(label){
+    return `<div class="standings-group-header">${label}</div>`;
   }
 
   function renderStandingsRow(row, rank){
@@ -228,9 +345,19 @@ export function createFlatStandingsBoard(opts){
   }
 
   let mode = conferences[0].mode; // e.g. 'east' | 'west' | 'byDrafter'
+  // Only meaningful when hasDivisions is true and mode isn't 'byDrafter'
+  // — mirrors nflConferenceSubMode in js/standings-nfl.js: Divisions
+  // (the heavier per-division fetch) vs. that conference's flat Full
+  // ranking (the cheap one every other view already needs).
+  let conferenceSubMode = 'division';
 
   function setMode(m){
     mode = m;
+    renderStandings();
+  }
+
+  function setConferenceSubMode(subMode){
+    conferenceSubMode = subMode;
     renderStandings();
   }
 
@@ -238,12 +365,21 @@ export function createFlatStandingsBoard(opts){
     const buttons = conferences.map(c =>
       `<button class="toggle-btn ${mode === c.mode ? 'active' : ''}" onclick="${setModeGlobalName}('${c.mode}')">${c.label}</button>`
     ).join('');
-    return `
+    const topRow = `
       <div class="standings-toggle">
         ${buttons}
         <button class="toggle-btn ${mode === 'byDrafter' ? 'active' : ''}" onclick="${setModeGlobalName}('byDrafter')">Person</button>
       </div>
     `;
+    if(!hasDivisions || mode === 'byDrafter') return topRow;
+
+    const subRow = `
+      <div class="standings-toggle standings-subtoggle">
+        <button class="toggle-btn ${conferenceSubMode === 'division' ? 'active' : ''}" onclick="${setSubModeGlobalName}('division')">Divisions</button>
+        <button class="toggle-btn ${conferenceSubMode === 'full' ? 'active' : ''}" onclick="${setSubModeGlobalName}('full')">Conference</button>
+      </div>
+    `;
+    return topRow + subRow;
   }
 
   // Each league needs its own window.* entry point (inline onclick
@@ -252,6 +388,8 @@ export function createFlatStandingsBoard(opts){
   // for this league can just call it without importing anything new.
   const setModeGlobalName = `set${leagueKey[0].toUpperCase()}${leagueKey.slice(1)}StandingsMode`;
   window[setModeGlobalName] = setMode;
+  const setSubModeGlobalName = `set${leagueKey[0].toUpperCase()}${leagueKey.slice(1)}ConferenceSubMode`;
+  window[setSubModeGlobalName] = setConferenceSubMode;
 
   return {
     cache, isFresh, load, fetchCached,
@@ -259,6 +397,9 @@ export function createFlatStandingsBoard(opts){
     getMode: () => mode, conferences,
     computeConferenceStandings, renderStandingsRow,
     computeDrafterCombined, renderByDrafterRow,
-    toggleHtml
+    toggleHtml,
+    hasDivisions, divisionCache, loadDivisionCache, fetchDivisionCached,
+    computeDivisionStandings, findDivisionForMeta, divisionLabel, renderGroupHeader,
+    getConferenceSubMode: () => conferenceSubMode
   };
 }

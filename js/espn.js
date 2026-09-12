@@ -305,6 +305,166 @@ export async function fetchEspnNflDivisionStandings(){
   return divisions;
 }
 
+// Shared by the division-standings fetchers below (NBA/NHL/MLB) —
+// generalizes the same hypermedia-chain approach fetchEspnNflDivisionStandings
+// above uses, once NBA/NHL/MLB needed the same treatment (NFL itself is
+// left as its own separate function above rather than refactored onto
+// this, to avoid touching already-shipped, working behavior for a
+// refactor with no user-facing benefit). Same idea: a static
+// division -> {groupId, conferenceAbbr} map (confirmed live per league,
+// hardcoded by each caller below) walked via the core API's
+// /groups/{id}/standings/0, cross-referenced against that league's own
+// cheap flat fetch for team identity — the standings entry's `team` is
+// only a further $ref here, same as NFL's version.
+// recordName is the per-sport bucket name for a team's real season
+// record on that sub-resource — confirmed live: NFL/NHL/MLB all call it
+// 'overall', but NBA's equivalent bucket (no record literally named
+// 'overall' exists on NBA's per-division standings resource) is named
+// 'Division Standings' instead, so this takes it as a parameter rather
+// than assuming one name works everywhere.
+// statNames is which fields off that record to carry through — differs
+// by sport (NHL's otLosses/points, MLB's ties/gamesBehind, etc — same
+// per-sport field sets fetchEspnFlatStandings's callers already use).
+// conferenceAbbr comes from the caller's own division map rather than
+// parsed off the division's display name — unlike NFL's "AFC East"
+// (where a simple prefix match works), MLB's division names collide
+// across leagues ("AL East"/"NL East" both end in "East"), so this
+// stays explicit instead of re-deriving it from a string.
+// shortName is an optional per-division override for display contexts
+// that already show the conference separately (the team modal's own
+// Division stat cell, right next to its Conference one — showing "AL
+// East" there would repeat "AL" that's already the cell to its left).
+// Defaults to the division key itself when a caller doesn't need one
+// (NBA/NHL's division names don't collide across conferences, so they
+// don't set one) — only MLB's map below does.
+// Shape returned: [{ division, shortName, conferenceAbbr, teams: [{
+// teamId, teamName, teamNickname, abbreviation, logoUrl, ...statNames }] }]
+async function fetchEspnCoreDivisionStandings(corePath, divisionDefs, recordName, flatRows, statNames){
+  const byId = {};
+  flatRows.forEach(row => { byId[row.id] = row; });
+
+  const seasonYear = new Date().getFullYear();
+  const divisions = await Promise.all(
+    Object.entries(divisionDefs).map(async ([division, { groupId, conferenceAbbr, shortName }]) => {
+      const data = await fetchEspnCoreJSON(
+        `${ESPN_CORE_BASE}/v2/sports/${corePath}/seasons/${seasonYear}/types/2/groups/${groupId}/standings/0?lang=en&region=us`
+      );
+      const entries = (data && data.standings) || [];
+      const teams = entries.map(entry => {
+        const idMatch = /\/teams\/(\d+)/.exec((entry.team && entry.team.$ref) || '');
+        const teamId = idMatch ? idMatch[1] : null;
+        const known = teamId ? byId[teamId] : null;
+        const record = (entry.records || []).find(r => r.name === recordName);
+        const stat = name => {
+          const s = (record && record.stats || []).find(x => x.name === name);
+          return s ? s.value : null;
+        };
+        const row = {
+          teamId,
+          teamName: known ? known.teamName : null,
+          teamNickname: known ? known.teamNickname : null,
+          abbreviation: known ? known.abbreviation : null,
+          logoUrl: known ? known.logoUrl : null
+        };
+        statNames.forEach(name => { row[name] = stat(name); });
+        return row;
+      // Drop anything the id lookup failed to resolve rather than
+      // rendering a nameless row — same guard as NFL's version.
+      }).filter(t => t.abbreviation);
+      return { division, shortName: shortName || division, conferenceAbbr, teams };
+    })
+  );
+  // A division fetch that came back empty (one bad request out of the
+  // batch) shouldn't take out the whole standings view — same "surface
+  // it as an empty division" rule as NFL's version.
+  return divisions;
+}
+
+// Static, stable structural data — confirmed live (2026-09-12) by
+// walking the core API's 2 conference groups' own /children division-
+// group refs, same discovery method NFL's ids above were found with.
+// NBA's 6 divisions don't collide by name across conferences (unlike
+// MLB below), so the division name alone is used as the map key.
+const NBA_DIVISION_GROUP_IDS = {
+  'Atlantic': { groupId: 1, conferenceAbbr: 'East' },
+  'Central': { groupId: 2, conferenceAbbr: 'East' },
+  'Southeast': { groupId: 9, conferenceAbbr: 'East' },
+  'Northwest': { groupId: 11, conferenceAbbr: 'West' },
+  'Pacific': { groupId: 4, conferenceAbbr: 'West' },
+  'Southwest': { groupId: 10, conferenceAbbr: 'West' }
+};
+
+// Real division-by-division NBA standings (Atlantic, Pacific, etc) —
+// see fetchEspnCoreDivisionStandings above for the shared chain this
+// walks. Reuses fetchEspnNbaStandings for the id -> name/abbreviation/
+// logo lookup rather than a second flat request shape.
+// Shape returned: [{ division, conferenceAbbr, teams: [{ teamId,
+// teamName, teamNickname, abbreviation, logoUrl, wins, losses, streak,
+// winPercent, gamesBehind, pointsFor, pointsAgainst }] }]
+export async function fetchEspnNbaDivisionStandings(){
+  const flatRows = await fetchEspnNbaStandings();
+  if(!flatRows) return null;
+  return fetchEspnCoreDivisionStandings(
+    'basketball/leagues/nba', NBA_DIVISION_GROUP_IDS, 'Division Standings', flatRows,
+    ['wins', 'losses', 'streak', 'winPercent', 'gamesBehind', 'pointsFor', 'pointsAgainst']
+  );
+}
+
+// Confirmed live (2026-09-12) the same way as NBA's above. NHL's 4
+// divisions don't collide by name across conferences either.
+const NHL_DIVISION_GROUP_IDS = {
+  'Atlantic': { groupId: 32, conferenceAbbr: 'East' },
+  'Metropolitan': { groupId: 33, conferenceAbbr: 'East' },
+  'Central': { groupId: 31, conferenceAbbr: 'West' },
+  'Pacific': { groupId: 30, conferenceAbbr: 'West' }
+};
+
+// Real division-by-division NHL standings (Atlantic, Metropolitan,
+// Central, Pacific) — same chain as NBA's version above, but this
+// sport's real record bucket is named 'overall' (matches NFL/MLB, not
+// NBA's 'Division Standings' oddity).
+// Shape returned: [{ division, conferenceAbbr, teams: [{ teamId,
+// teamName, teamNickname, abbreviation, logoUrl, wins, losses,
+// otLosses, points, streak }] }]
+export async function fetchEspnNhlDivisionStandings(){
+  const flatRows = await fetchEspnNhlStandings();
+  if(!flatRows) return null;
+  return fetchEspnCoreDivisionStandings(
+    'hockey/leagues/nhl', NHL_DIVISION_GROUP_IDS, 'overall', flatRows,
+    ['wins', 'losses', 'otLosses', 'points', 'streak']
+  );
+}
+
+// Confirmed live (2026-09-12) the same way as NBA/NHL's above — but
+// unlike those, MLB's division names DO collide across leagues (AL
+// East/Central/West vs NL East/Central/West all share the same 3 short
+// names), so the map key carries the league prefix to stay unique; the
+// conferenceAbbr field (not the key) is what computeDivisionStandings
+// actually filters on.
+const MLB_DIVISION_GROUP_IDS = {
+  'AL East': { groupId: 1, conferenceAbbr: 'AL', shortName: 'East' },
+  'AL Central': { groupId: 2, conferenceAbbr: 'AL', shortName: 'Central' },
+  'AL West': { groupId: 3, conferenceAbbr: 'AL', shortName: 'West' },
+  'NL East': { groupId: 4, conferenceAbbr: 'NL', shortName: 'East' },
+  'NL Central': { groupId: 5, conferenceAbbr: 'NL', shortName: 'Central' },
+  'NL West': { groupId: 6, conferenceAbbr: 'NL', shortName: 'West' }
+};
+
+// Real division-by-division MLB standings (AL/NL East/Central/West) —
+// same chain as NBA/NHL's versions above; MLB's real record bucket is
+// 'overall', same as NHL/NFL.
+// Shape returned: [{ division, conferenceAbbr, teams: [{ teamId,
+// teamName, teamNickname, abbreviation, logoUrl, wins, losses, ties,
+// winPercent, gamesBehind, streak }] }]
+export async function fetchEspnMlbDivisionStandings(){
+  const flatRows = await fetchEspnMlbStandings();
+  if(!flatRows) return null;
+  return fetchEspnCoreDivisionStandings(
+    'baseball/leagues/mlb', MLB_DIVISION_GROUP_IDS, 'overall', flatRows,
+    ['wins', 'losses', 'ties', 'winPercent', 'gamesBehind', 'streak']
+  );
+}
+
 // Real AP Top 25 (or any of ESPN's other 4 CFB polls — Coaches, FCS
 // Coaches, D2/D3 Coaches — pass its exact `name` from the `rankings`
 // array). Richer than TheRundown's flat 1-25 "ranking" field: also

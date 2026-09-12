@@ -9,10 +9,10 @@ import { API_BASE, fetchRundownEventForTeam, isRundownEventLive, V2_MIGRATED_LEA
 import { fetchEplStandingsTable, findEspnEplRow } from './standings-epl.js';
 import { fetchEspnTeamSchedule, fetchEspnScoreboard, findEspnScoreboardLine } from './espn.js';
 import { findCfbRecord, findEspnCfbRow, fetchEspnCfbRecordsCached } from './standings-cfb.js';
-import { findEspnNflRow, fetchEspnNflStandingsCached } from './standings-nfl.js';
-import { nbaRecordLabel, findEspnNbaRow, fetchEspnNbaStandingsCached } from './standings-nba.js';
-import { nhlRecordLabel, findEspnNhlRow, fetchEspnNhlStandingsCached } from './standings-nhl.js';
-import { mlbRecordLabel, findEspnMlbRow, fetchEspnMlbStandingsCached } from './standings-mlb.js';
+import { findEspnNflRow, fetchEspnNflStandingsCached, nflDivisionLabel, fetchEspnNflDivisionStandingsCached } from './standings-nfl.js';
+import { nbaRecordLabel, findEspnNbaRow, fetchEspnNbaStandingsCached, nbaDivisionLabel, fetchEspnNbaDivisionStandingsCached } from './standings-nba.js';
+import { nhlRecordLabel, findEspnNhlRow, fetchEspnNhlStandingsCached, nhlDivisionLabel, fetchEspnNhlDivisionStandingsCached } from './standings-nhl.js';
+import { mlbRecordLabel, findEspnMlbRow, fetchEspnMlbStandingsCached, mlbDivisionLabel, fetchEspnMlbDivisionStandingsCached } from './standings-mlb.js';
 import { wnbaRecordLabel, findEspnWnbaRow, fetchEspnWnbaStandingsCached } from './standings-wnba.js';
 import { trackerSectionHtml } from './league-facts.js';
 
@@ -379,16 +379,25 @@ export function renderStats(meta, bundle){
   // findEspnNflRow/nflRecordLabel in js/standings-nfl.js) — this used
   // to read TheRundown's per-team division field instead, which could
   // (and did) drift from what the Standings tab showed once that moved
-  // to ESPN. "Conference" here, not "Division", for the same reason the
-  // Standings tab's toggle was relabeled — ESPN's simple standings
-  // endpoint doesn't have real division data, only conference.
+  // to ESPN. Division now comes from that same Standings-tab source too
+  // (nflDivisionLabel/fetchEspnNflDivisionStandingsCached) — it didn't
+  // exist when this modal was first built (ESPN's simple standings
+  // endpoint has no division field at all; that heavier per-division
+  // fetch came later), which is why Conference used to be the only
+  // grouping shown here. fetchEspnNflDivisionStandingsCached is a no-op
+  // if already fresh; kicked off here (not just from the Standings tab)
+  // since this is often the first place in a session that needs it —
+  // its own completion re-renders this modal if it's still open once
+  // that heavier fetch resolves.
   if(meta.leagueKey === 'nfl'){
     const row = findEspnNflRow(meta);
     if(row){
       const recordLabel = `${row.wins}-${row.losses}${row.ties ? '-' + row.ties : ''}`;
+      fetchEspnNflDivisionStandingsCached();
       el.innerHTML = `
         <div class="stat-cell"><div class="num">${recordLabel}</div><div class="lbl">Record</div></div>
         <div class="stat-cell"><div class="num" style="font-size:14px;">${row.conferenceAbbr || '—'}</div><div class="lbl">Conference</div></div>
+        <div class="stat-cell"><div class="num" style="font-size:14px;">${nflDivisionLabel(meta) || '—'}</div><div class="lbl">Division</div></div>
       `;
       return;
     }
@@ -397,14 +406,19 @@ export function renderStats(meta, bundle){
   // NBA/NHL/MLB/WNBA: same ESPN standings source the Standings tab
   // reads (js/standings-flat.js's createFlatStandingsBoard) — these 4
   // leagues had no real record source at all before ESPN, only the
-  // generic Sport/Founded/Stadium bio fields below.
+  // generic Sport/Founded/Stadium bio fields below. Division (NBA/NHL/
+  // MLB only — WNBA has no real divisions, see js/standings-wnba.js)
+  // follows the same "kick off the heavier fetch here, its own
+  // completion re-renders this modal" pattern as NFL's above.
   if(meta.leagueKey === 'nba'){
     const record = nbaRecordLabel(meta);
     if(record){
       const row = findEspnNbaRow(meta);
+      fetchEspnNbaDivisionStandingsCached();
       el.innerHTML = `
         <div class="stat-cell"><div class="num">${record}</div><div class="lbl">Record</div></div>
         <div class="stat-cell"><div class="num" style="font-size:14px;">${row.conferenceAbbr || '—'}</div><div class="lbl">Conference</div></div>
+        <div class="stat-cell"><div class="num" style="font-size:14px;">${nbaDivisionLabel(meta) || '—'}</div><div class="lbl">Division</div></div>
       `;
       return;
     }
@@ -413,10 +427,12 @@ export function renderStats(meta, bundle){
     const record = nhlRecordLabel(meta);
     if(record){
       const row = findEspnNhlRow(meta);
+      fetchEspnNhlDivisionStandingsCached();
       el.innerHTML = `
         <div class="stat-cell"><div class="num">${row.wins}-${row.losses}-${row.otLosses || 0}</div><div class="lbl">Record</div></div>
         <div class="stat-cell"><div class="num">${row.points}</div><div class="lbl">Points</div></div>
         <div class="stat-cell"><div class="num" style="font-size:14px;">${row.conferenceAbbr || '—'}</div><div class="lbl">Conference</div></div>
+        <div class="stat-cell"><div class="num" style="font-size:14px;">${nhlDivisionLabel(meta) || '—'}</div><div class="lbl">Division</div></div>
       `;
       return;
     }
@@ -425,9 +441,11 @@ export function renderStats(meta, bundle){
     const record = mlbRecordLabel(meta);
     if(record){
       const row = findEspnMlbRow(meta);
+      fetchEspnMlbDivisionStandingsCached();
       el.innerHTML = `
         <div class="stat-cell"><div class="num">${record}</div><div class="lbl">Record</div></div>
         <div class="stat-cell"><div class="num" style="font-size:14px;">${row.conferenceAbbr || '—'}</div><div class="lbl">League</div></div>
+        <div class="stat-cell"><div class="num" style="font-size:14px;">${mlbDivisionLabel(meta) || '—'}</div><div class="lbl">Division</div></div>
       `;
       return;
     }

@@ -1,12 +1,14 @@
 /* ============================================================
    MLB Standings: real league standings (AL/NL — ESPN's own group name,
-   not "conference") plus each drafter's combined win percentage across
-   their MLB teams. No standings source existed for this league before
-   ESPN either. Ties are vanishingly rare in modern MLB but the field
-   exists on ESPN's endpoint, so it's carried through rather than
-   assumed zero (same reasoning as NFL's ties field).
+   not "conference"), each nested with a real Division breakdown (AL/NL
+   East/Central/West — see fetchEspnMlbDivisionStandings in js/espn.js),
+   plus each drafter's combined win percentage across their MLB teams.
+   No standings source existed for this league before ESPN either. Ties
+   are vanishingly rare in modern MLB but the field exists on ESPN's
+   endpoint, so it's carried through rather than assumed zero (same
+   reasoning as NFL's ties field).
    ============================================================ */
-import { fetchEspnMlbStandings } from './espn.js';
+import { fetchEspnMlbStandings, fetchEspnMlbDivisionStandings } from './espn.js';
 import { createFlatStandingsBoard } from './standings-flat.js';
 
 function winPct(b){
@@ -19,6 +21,7 @@ const board = createFlatStandingsBoard({
   cacheKey: 'teamDashboardEspnMlbStandingsCache',
   ttlMs: 60 * 60 * 1000,
   fetchStandings: fetchEspnMlbStandings,
+  fetchDivisionStandings: fetchEspnMlbDivisionStandings,
   conferences: [
     { abbr: 'AL', mode: 'al', label: 'AL' },
     { abbr: 'NL', mode: 'nl', label: 'NL' }
@@ -59,3 +62,11 @@ export const renderMlbByDrafterRow = board.renderByDrafterRow;
 export const mlbStandingsToggleHtml = board.toggleHtml;
 export function getMlbStandingsMode(){ return board.getMode(); }
 export const mlbConferences = board.conferences;
+export const mlbHasDivisions = board.hasDivisions;
+export const espnMlbDivisionCache = board.divisionCache;
+export const loadEspnMlbDivisionCache = board.loadDivisionCache;
+export const fetchEspnMlbDivisionStandingsCached = board.fetchDivisionCached;
+export const computeMlbDivisionStandings = board.computeDivisionStandings;
+export const renderMlbGroupHeader = board.renderGroupHeader;
+export function getMlbConferenceSubMode(){ return board.getConferenceSubMode(); }
+export const mlbDivisionLabel = board.divisionLabel;

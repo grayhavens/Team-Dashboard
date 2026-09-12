@@ -31,17 +31,23 @@ import {
 import {
   espnNbaStandingsCache, loadEspnNbaStandingsCache, fetchEspnNbaStandingsCached, renderAllNbaCardRecords,
   computeNbaConferenceStandings, renderNbaStandingsRow, computeNbaDrafterCombined, renderNbaByDrafterRow,
-  nbaStandingsToggleHtml, getNbaStandingsMode, nbaConferences
+  nbaStandingsToggleHtml, getNbaStandingsMode, nbaConferences,
+  nbaHasDivisions, espnNbaDivisionCache, loadEspnNbaDivisionCache, fetchEspnNbaDivisionStandingsCached,
+  computeNbaDivisionStandings, renderNbaGroupHeader, getNbaConferenceSubMode
 } from './standings-nba.js';
 import {
   espnNhlStandingsCache, loadEspnNhlStandingsCache, fetchEspnNhlStandingsCached, renderAllNhlCardRecords,
   computeNhlConferenceStandings, renderNhlStandingsRow, computeNhlDrafterCombined, renderNhlByDrafterRow,
-  nhlStandingsToggleHtml, getNhlStandingsMode, nhlConferences
+  nhlStandingsToggleHtml, getNhlStandingsMode, nhlConferences,
+  nhlHasDivisions, espnNhlDivisionCache, loadEspnNhlDivisionCache, fetchEspnNhlDivisionStandingsCached,
+  computeNhlDivisionStandings, renderNhlGroupHeader, getNhlConferenceSubMode
 } from './standings-nhl.js';
 import {
   espnMlbStandingsCache, loadEspnMlbStandingsCache, fetchEspnMlbStandingsCached, renderAllMlbCardRecords,
   computeMlbConferenceStandings, renderMlbStandingsRow, computeMlbDrafterCombined, renderMlbByDrafterRow,
-  mlbStandingsToggleHtml, getMlbStandingsMode, mlbConferences
+  mlbStandingsToggleHtml, getMlbStandingsMode, mlbConferences,
+  mlbHasDivisions, espnMlbDivisionCache, loadEspnMlbDivisionCache, fetchEspnMlbDivisionStandingsCached,
+  computeMlbDivisionStandings, renderMlbGroupHeader, getMlbConferenceSubMode
 } from './standings-mlb.js';
 import {
   espnWnbaStandingsCache, loadEspnWnbaStandingsCache, fetchEspnWnbaStandingsCached, renderAllWnbaCardRecords,
@@ -312,15 +318,39 @@ function leagueBlockHtml(league, bodyHtml){
 }
 
 // Shared render body for the 4 "flat" ESPN-standings leagues (NBA/NHL/
-// MLB/WNBA) — conference/league toggle + Person, no division sub-toggle
-// (unlike NFL, none of these have division grouping wired up yet). Each
-// api bundle is just that league's own exports from js/standings-flat.js
-// (see js/standings-nba.js etc.) — this only knows the shape they all
-// share, not any sport-specific detail.
+// MLB/WNBA) — conference/league toggle + Person, plus (for NBA/NHL/MLB,
+// api.hasDivisions true) a nested Divisions-vs-Conference sub-toggle
+// under each conference, same idea NFL pioneered in its own bespoke
+// block below before this was generalized. WNBA has no real divisions,
+// so api.hasDivisions is false there and this behaves exactly as it
+// did before division support existed. Each api bundle is just that
+// league's own exports from js/standings-flat.js (see js/standings-nba.js
+// etc.) — this only knows the shape they all share, not any
+// sport-specific detail.
 function renderFlatLeagueBlock(league, api){
   const mode = api.getMode();
   let bodyHtml;
-  if(mode === 'byDrafter'){
+
+  const usesDivisionCache = api.hasDivisions && mode !== 'byDrafter' && api.getConferenceSubMode() === 'division';
+
+  if(usesDivisionCache){
+    const confAbbr = api.conferences.find(c => c.mode === mode).abbr;
+    if(api.divisionCache.divisions){
+      const divisions = api.computeDivisionStandings(confAbbr);
+      const rowsHtml = divisions.length
+        ? divisions.map(div =>
+            api.renderGroupHeader(div.name) + div.teams.map((t, i) => api.renderStandingsRow(t, i + 1)).join('')
+          ).join('')
+        : `<div class="no-live-note">No teams currently reporting.</div>`;
+      bodyHtml = api.toggleHtml() + rowsHtml;
+      api.fetchDivisionCached(); // no-op if already fresh; quietly refreshes in the background if stale
+    } else if(api.divisionCache.error){
+      bodyHtml = `<div class="no-live-note">No data available.</div>`;
+    } else {
+      api.fetchDivisionCached();
+      bodyHtml = `<div class="loading-note">Loading standings…</div>`;
+    }
+  } else if(mode === 'byDrafter'){
     if(api.cache.rows){
       const rowsHtml = api.computeDrafterCombined().map((row, i) => api.renderByDrafterRow(row, i + 1)).join('');
       bodyHtml = api.toggleHtml() + rowsHtml;
@@ -488,19 +518,28 @@ export function renderStandings(){
       cache: espnNbaStandingsCache, fetchCached: fetchEspnNbaStandingsCached, getMode: getNbaStandingsMode,
       conferences: nbaConferences, computeConferenceStandings: computeNbaConferenceStandings,
       renderStandingsRow: renderNbaStandingsRow, computeDrafterCombined: computeNbaDrafterCombined,
-      renderByDrafterRow: renderNbaByDrafterRow, toggleHtml: nbaStandingsToggleHtml
+      renderByDrafterRow: renderNbaByDrafterRow, toggleHtml: nbaStandingsToggleHtml,
+      hasDivisions: nbaHasDivisions, divisionCache: espnNbaDivisionCache, fetchDivisionCached: fetchEspnNbaDivisionStandingsCached,
+      computeDivisionStandings: computeNbaDivisionStandings, renderGroupHeader: renderNbaGroupHeader,
+      getConferenceSubMode: getNbaConferenceSubMode
     });
     if(league.key === 'nhl') return renderFlatLeagueBlock(league, {
       cache: espnNhlStandingsCache, fetchCached: fetchEspnNhlStandingsCached, getMode: getNhlStandingsMode,
       conferences: nhlConferences, computeConferenceStandings: computeNhlConferenceStandings,
       renderStandingsRow: renderNhlStandingsRow, computeDrafterCombined: computeNhlDrafterCombined,
-      renderByDrafterRow: renderNhlByDrafterRow, toggleHtml: nhlStandingsToggleHtml
+      renderByDrafterRow: renderNhlByDrafterRow, toggleHtml: nhlStandingsToggleHtml,
+      hasDivisions: nhlHasDivisions, divisionCache: espnNhlDivisionCache, fetchDivisionCached: fetchEspnNhlDivisionStandingsCached,
+      computeDivisionStandings: computeNhlDivisionStandings, renderGroupHeader: renderNhlGroupHeader,
+      getConferenceSubMode: getNhlConferenceSubMode
     });
     if(league.key === 'mlb') return renderFlatLeagueBlock(league, {
       cache: espnMlbStandingsCache, fetchCached: fetchEspnMlbStandingsCached, getMode: getMlbStandingsMode,
       conferences: mlbConferences, computeConferenceStandings: computeMlbConferenceStandings,
       renderStandingsRow: renderMlbStandingsRow, computeDrafterCombined: computeMlbDrafterCombined,
-      renderByDrafterRow: renderMlbByDrafterRow, toggleHtml: mlbStandingsToggleHtml
+      renderByDrafterRow: renderMlbByDrafterRow, toggleHtml: mlbStandingsToggleHtml,
+      hasDivisions: mlbHasDivisions, divisionCache: espnMlbDivisionCache, fetchDivisionCached: fetchEspnMlbDivisionStandingsCached,
+      computeDivisionStandings: computeMlbDivisionStandings, renderGroupHeader: renderMlbGroupHeader,
+      getConferenceSubMode: getMlbConferenceSubMode
     });
     if(league.key === 'wnba') return renderFlatLeagueBlock(league, {
       cache: espnWnbaStandingsCache, fetchCached: fetchEspnWnbaStandingsCached, getMode: getWnbaStandingsMode,
@@ -543,8 +582,11 @@ loadEspnCfbRecordsCache();
 loadEspnNflStandingsCache();
 loadEspnNflDivisionCache();
 loadEspnNbaStandingsCache();
+loadEspnNbaDivisionCache();
 loadEspnNhlStandingsCache();
+loadEspnNhlDivisionCache();
 loadEspnMlbStandingsCache();
+loadEspnMlbDivisionCache();
 loadEspnWnbaStandingsCache();
 loadTeamInfoCache();
 renderBoard();

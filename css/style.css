@@ -29,6 +29,13 @@
   --record-border: rgba(154,165,181,0.38);
   --badge-surface: #E9E6DE;
   --nav-h: 74px;
+  /* Body's own horizontal padding — pulled into a variable so
+     .standings-filter-row (see below) can bleed its sticky background
+     out to the real screen edges instead of stopping at this inset,
+     and stay in sync with the narrower value the max-width:700px
+     breakpoint below swaps in, without restating body's own rule
+     there. */
+  --page-pad: 24px;
 }
 
 *{ box-sizing: border-box; margin:0; padding:0; -webkit-tap-highlight-color: transparent; }
@@ -39,7 +46,7 @@ body{
   background: var(--bg);
   color: var(--text);
   font-family: 'Manrope', sans-serif;
-  padding: calc(env(safe-area-inset-top) + 24px) 24px calc(var(--nav-h) + 24px + env(safe-area-inset-bottom));
+  padding: calc(env(safe-area-inset-top) + var(--page-pad)) var(--page-pad) calc(var(--nav-h) + var(--page-pad) + env(safe-area-inset-bottom));
   min-height: 100vh;
   overscroll-behavior-y: contain;
 }
@@ -346,7 +353,7 @@ body{
 }
 
 @media (max-width: 700px){
-  body{ padding: calc(env(safe-area-inset-top) + 16px) 16px calc(var(--nav-h) + 16px + env(safe-area-inset-bottom)); }
+  :root{ --page-pad: 16px; }
   .leagues{ grid-template-columns: 1fr; gap: 16px; }
 }
 
@@ -1102,12 +1109,26 @@ body{
 /* ---- Standings view (real per-league tables) ---- */
 /* Pinned so the league filter stays reachable while scrolling a long
    table — offset by the safe-area inset (not a flat 0) so it settles
-   below the notch/status bar instead of sliding under it. */
+   below the notch/status bar instead of sliding under it.
+   Bleeds out to the actual screen edges via a negative margin matching
+   body's own horizontal padding (--page-pad), then re-adds that as
+   padding so the chips inside still line up with everything else on
+   the page — without this, the sticky bar's opaque background stopped
+   short of the edges (inset by body's padding like everything else),
+   and standings rows scrolling up underneath it were visible through
+   that gap on iOS Safari, which also never fully repaints a plain
+   `position: sticky` element as its own layer during scroll — the
+   translateZ(0) below forces that, which is the standard fix for
+   content flashing/bleeding through a sticky bar on iOS. */
 .standings-filter-row{
   position: sticky;
   top: env(safe-area-inset-top);
-  background: var(--bg);
   z-index: 5;
+  margin: 0 calc(-1 * var(--page-pad));
+  padding: 0 var(--page-pad);
+  background: var(--bg);
+  transform: translateZ(0);
+  -webkit-transform: translateZ(0);
 }
 
 .standings-toggle{
@@ -1764,12 +1785,22 @@ body{
   z-index: 150;
 }
 
+/* Total height is --nav-h PLUS the safe-area inset, not just --nav-h
+   with the inset squeezed inside it (which is what a plain `height:
+   var(--nav-h)` gave, since everything here is box-sizing: border-box —
+   padding-bottom ate into the box instead of extending it). That left
+   the tab icons/labels cramped into less than --nav-h of real space on
+   any notched/home-indicator iPhone, and the bar's top edge sitting
+   well below where .build-tag already assumed it would be (that
+   marker's own `bottom` calc was already written for a bar this tall —
+   see above) — the mismatch is what read as the bar looking short/cut
+   off just above it. */
 .tab-bar{
   position: fixed;
   left: 0;
   right: 0;
   bottom: 0;
-  height: var(--nav-h);
+  height: calc(var(--nav-h) + env(safe-area-inset-bottom));
   padding-bottom: env(safe-area-inset-bottom);
   background: rgba(19,20,24,0.82);
   backdrop-filter: blur(20px);

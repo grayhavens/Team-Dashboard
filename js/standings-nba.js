@@ -1,15 +1,18 @@
 /* ============================================================
-   NBA Standings: real conference standings (East/West) plus each
-   drafter's combined win percentage across their 3 NBA teams — this
-   league had NO standings source at all before ESPN (TheSportsDB's
-   free/V1 tier has never carried real NBA standings), so unlike EPL/
-   CFB/NFL this isn't replacing a shakier existing source, it's turning
-   on a tab that previously just said "No data available."
+   NBA Standings: real conference standings (East/West), each nested
+   with a real Division breakdown (Atlantic/Central/Southeast/
+   Northwest/Pacific/Southwest — see fetchEspnNbaDivisionStandings in
+   js/espn.js), plus each drafter's combined win percentage across
+   their 3 NBA teams — this league had NO standings source at all
+   before ESPN (TheSportsDB's free/V1 tier has never carried real NBA
+   standings), so unlike EPL/CFB/NFL this isn't replacing a shakier
+   existing source, it's turning on a tab that previously just said "No
+   data available."
    Shares its cache/toggle/render engine with NHL/MLB/WNBA — see
    createFlatStandingsBoard in js/standings-flat.js for what's generic
    and what's sport-specific below.
    ============================================================ */
-import { fetchEspnNbaStandings } from './espn.js';
+import { fetchEspnNbaStandings, fetchEspnNbaDivisionStandings } from './espn.js';
 import { createFlatStandingsBoard } from './standings-flat.js';
 
 // Win percentage isn't carried on the combined bucket itself — derived
@@ -25,6 +28,7 @@ const board = createFlatStandingsBoard({
   cacheKey: 'teamDashboardEspnNbaStandingsCache',
   ttlMs: 60 * 60 * 1000,
   fetchStandings: fetchEspnNbaStandings,
+  fetchDivisionStandings: fetchEspnNbaDivisionStandings,
   conferences: [
     { abbr: 'East', mode: 'east', label: 'East' },
     { abbr: 'West', mode: 'west', label: 'West' }
@@ -64,3 +68,11 @@ export const renderNbaByDrafterRow = board.renderByDrafterRow;
 export const nbaStandingsToggleHtml = board.toggleHtml;
 export function getNbaStandingsMode(){ return board.getMode(); }
 export const nbaConferences = board.conferences;
+export const nbaHasDivisions = board.hasDivisions;
+export const espnNbaDivisionCache = board.divisionCache;
+export const loadEspnNbaDivisionCache = board.loadDivisionCache;
+export const fetchEspnNbaDivisionStandingsCached = board.fetchDivisionCached;
+export const computeNbaDivisionStandings = board.computeDivisionStandings;
+export const renderNbaGroupHeader = board.renderGroupHeader;
+export function getNbaConferenceSubMode(){ return board.getConferenceSubMode(); }
+export const nbaDivisionLabel = board.divisionLabel;
