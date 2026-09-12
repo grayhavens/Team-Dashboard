@@ -6,7 +6,7 @@
    window.* entry points for the inline onclick handlers in the
    rendered HTML.
    ============================================================ */
-import { DRAFT_TEAMS, TEAM_META, LEAGUES, LEAGUE_SCORING } from './data.js';
+import { DRAFT_TEAMS, TEAM_META, LEAGUES, LEAGUE_SCORING, PRIOR_SEASON_DISPLAY_LEAGUES } from './data.js';
 import { updateUrlParam, lockBodyScroll, CLOSE_ICON_SVG, teamBadgeHtml } from './utils.js';
 import { LEAGUE_FACTS_LEAGUES, migrateAchievementsToFacts } from './league-facts.js';
 import { UPCOMING_CHIP_LEAGUES } from './api.js';
@@ -283,6 +283,13 @@ function leagueBlockHtml(league, bodyHtml){
     ? `<div class="scoring-chip" onclick="openLeagueResultsModal('${league.key}')">Results</div>`
     : '';
   const headerLabel = LEAGUE_FULL_LABELS[league.key] || league.label;
+  // MLB/WNBA: the records below are ESPN's real, live '26 standings —
+  // still worth showing — but drafted teams don't start scoring until
+  // the '27 season actually begins. See PRIOR_SEASON_DISPLAY_LEAGUES
+  // in js/data.js.
+  const priorSeasonNoteHtml = PRIOR_SEASON_DISPLAY_LEAGUES.includes(league.key)
+    ? `<div class="prior-season-note">Showing the '26 season, still in progress — these results won't count towards drafted team point totals until the '27 season.</div>`
+    : '';
 
   return `
     <div class="league">
@@ -297,6 +304,7 @@ function leagueBlockHtml(league, bodyHtml){
           </div>
           <span class="n">${league.season}</span>
         </div>
+        ${priorSeasonNoteHtml}
       </div>
       ${bodyHtml}
     </div>
