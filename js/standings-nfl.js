@@ -227,6 +227,16 @@ export function fetchEspnNflDivisionStandingsCached(){
       espnNflDivisionCache.error = true;
     }
     renderStandings();
+    // The team modal's Division stat cell (js/live-data.js's
+    // renderStats) reads this same cache, and can easily open before
+    // this heavier fetch resolves (it's only triggered on-demand, not
+    // eagerly at boot) — same "activeTeam" re-render idea as
+    // fetchEspnNflStandingsCached above, just for this cache instead.
+    const activeTeam = document.getElementById('modal-content').dataset.activeTeam;
+    const activeMeta = activeTeam && TEAM_META[activeTeam];
+    if(activeMeta && activeMeta.leagueKey === 'nfl'){
+      renderStats(activeMeta, liveDataCache[activeTeam] || {});
+    }
   })();
   return espnNflDivisionPromise;
 }
@@ -254,6 +264,24 @@ export function computeNflDivisionStandings(conferenceAbbr){
 
 export function renderNflGroupHeader(label){
   return `<div class="standings-group-header">${label}</div>`;
+}
+
+// Given a drafted team's own meta, find which division it's in — used
+// by the team modal's Division stat cell (js/live-data.js). Matches by
+// badgeText/abbreviation the same way findEspnNflRow does, since a
+// division-cache team entry carries no direct link back to TEAM_META.
+function findNflDivisionForMeta(meta){
+  const divisions = espnNflDivisionCache.divisions;
+  if(!divisions || !meta.badgeText) return null;
+  return divisions.find(div => div.teams.some(t => (NFL_ESPN_ABBR_OVERRIDES[t.abbreviation] || t.abbreviation) === meta.badgeText)) || null;
+}
+
+// The bare division name ("North"), not the full "AFC North" — the
+// conference is always shown as its own, separate stat cell right next
+// to this one, so repeating it here would be redundant.
+export function nflDivisionLabel(meta){
+  const div = findNflDivisionForMeta(meta);
+  return div ? div.division.replace(/^(AFC|NFC)\s+/, '') : null;
 }
 
 export function renderNflStandingsRow(row, rank){

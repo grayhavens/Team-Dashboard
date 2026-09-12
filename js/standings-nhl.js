@@ -1,5 +1,7 @@
 /* ============================================================
-   NHL Standings: real conference standings (East/West) plus each
+   NHL Standings: real conference standings (East/West), each nested
+   with a real Division breakdown (Atlantic/Metropolitan/Central/
+   Pacific — see fetchEspnNhlDivisionStandings in js/espn.js), plus each
    drafter's combined record across their NHL teams. No standings
    source existed for this league before ESPN either.
    Hockey ranks by points (2 per win, 1 per OT/shootout loss), not win
@@ -7,7 +9,7 @@
    loss still earns a point, so this sorts and combines on `points`
    throughout rather than deriving a percentage the way NBA/MLB/WNBA do.
    ============================================================ */
-import { fetchEspnNhlStandings } from './espn.js';
+import { fetchEspnNhlStandings, fetchEspnNhlDivisionStandings } from './espn.js';
 import { createFlatStandingsBoard } from './standings-flat.js';
 
 const board = createFlatStandingsBoard({
@@ -15,6 +17,7 @@ const board = createFlatStandingsBoard({
   cacheKey: 'teamDashboardEspnNhlStandingsCache',
   ttlMs: 60 * 60 * 1000,
   fetchStandings: fetchEspnNhlStandings,
+  fetchDivisionStandings: fetchEspnNhlDivisionStandings,
   conferences: [
     { abbr: 'East', mode: 'east', label: 'East' },
     { abbr: 'West', mode: 'west', label: 'West' }
@@ -49,3 +52,11 @@ export const renderNhlByDrafterRow = board.renderByDrafterRow;
 export const nhlStandingsToggleHtml = board.toggleHtml;
 export function getNhlStandingsMode(){ return board.getMode(); }
 export const nhlConferences = board.conferences;
+export const nhlHasDivisions = board.hasDivisions;
+export const espnNhlDivisionCache = board.divisionCache;
+export const loadEspnNhlDivisionCache = board.loadDivisionCache;
+export const fetchEspnNhlDivisionStandingsCached = board.fetchDivisionCached;
+export const computeNhlDivisionStandings = board.computeDivisionStandings;
+export const renderNhlGroupHeader = board.renderGroupHeader;
+export function getNhlConferenceSubMode(){ return board.getConferenceSubMode(); }
+export const nhlDivisionLabel = board.divisionLabel;

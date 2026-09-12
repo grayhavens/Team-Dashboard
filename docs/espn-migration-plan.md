@@ -412,3 +412,48 @@ last result, and next match with real venue/broadcast, same as any team with a `
 Scoped to the 7 `FLAT_SCHEDULE_LEAGUES` leagues only — College Basketball still has no ESPN integration
 at all (see phase E), so its teams without a `rundownTeamId` still show the placeholder, correctly:
 there's genuinely no data source for them yet.
+
+## Team badge logos for NBA/NHL/MLB/WNBA (2026-09-12)
+
+EPL/CFB/NFL's drafted teams each carry a static `badgeUrl` in `TEAM_META` (`js/data.js`) — real crest
+images, historically hotlinked from TheSportsDB, rendered via `teamBadgeHtml` (`js/utils.js`). The 100
+NBA/NHL/MLB/WNBA teams never got this treatment: `js/standings-flat.js`'s `renderStandingsRow` only
+gave an ESPN-sourced crest to *undrafted* teams (the `row.logoUrl` fallback in its inline `meta`
+object) — every drafted team in these 4 leagues fell through to the plain colored-monogram box
+everywhere (board cards, Standings tab, team modal), since `TEAM_META` had no `badgeUrl` at all for
+them. Fixed by adding one to every entry, sourced from ESPN's own logo CDN
+(`a.espncdn.com/i/teamlogos/{sport}/500/{abbr}.png`, confirmed stable/CORS-irrelevant since these are
+static hotlinks, not live API calls) rather than TheSportsDB, matching "SportsDB fully deprecated"
+above — pulled via each league's own `/apis/v2/sports/.../standings` endpoint (same one
+`fetchEspnFlatStandings` already uses) and matched to `TEAM_META` by team name, reusing the same exact-
+match/alias rules `findFlatTeamKey` already relies on. All 100 teams matched with no misses.
+
+## Division standings for NBA/NHL/MLB (2026-09-12)
+
+NFL was the only league with a real Division-nested-under-Conference standings view
+(`espnNflDivisionCache`/`fetchEspnNflDivisionStandings` in `js/standings-nfl.js`/`js/espn.js`) — NBA/
+NHL/MLB stayed flat (conference/league only) since `js/standings-flat.js`'s shared engine had no
+division concept at all. Generalized that engine instead of writing three more NFL-sized bespoke files:
+`createFlatStandingsBoard` now takes an optional `fetchDivisionStandings` — when a caller passes one
+(NBA/NHL/MLB do; WNBA doesn't, since real-world WNBA has no divisions), the board gains its own
+division cache, a nested Divisions/Conference sub-toggle under each conference (same UX NFL pioneered),
+and `js/board.js`'s shared `renderFlatLeagueBlock` branches on `api.hasDivisions` as NFL's own bespoke
+block already did. WNBA is untouched — omitting `fetchDivisionStandings` makes the board behave exactly
+as it did before this existed.
+
+Division data comes from the same hypermedia "core" API chain NFL's version pioneered
+(`sports.core.api.espn.com/v2/sports/{sport}/leagues/{league}/seasons/{year}/types/2/groups/{groupId}/standings/0`),
+generalized into a shared `fetchEspnCoreDivisionStandings` helper in `js/espn.js` (NFL's own function
+was left untouched rather than refactored onto it, to avoid risking already-shipped behavior for no
+user-facing gain). Division group ids were discovered live (2026-09-12) the same way NFL's were: walk
+each sport's 2 top-level conference groups' `/children` refs. Two real per-sport wrinkles found along
+the way:
+- **NBA's per-division record bucket isn't named `overall`** the way NFL/NHL/MLB's all are — confirmed
+  live, NBA's division-standings sub-resource instead names it `'Division Standings'` (no record
+  literally named `overall` exists there at all). `fetchEspnCoreDivisionStandings` takes the record name
+  as a parameter rather than assuming one string works everywhere.
+- **MLB's division names collide across leagues** — AL and NL both have an "East"/"Central"/"West".
+  Unlike NFL's "AFC East" (where a simple name-prefix match distinguishes conferences), each division
+  now carries its own explicit `conferenceAbbr` field (set directly from the caller's own division map,
+  not parsed off the display name), so `computeDivisionStandings(conferenceAbbr)` filters on that field
+  instead of string-matching a name.
