@@ -322,15 +322,15 @@ body{
 .scoring-chip{
   flex: 0 0 auto;
   font-family: 'Manrope', sans-serif;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
-  letter-spacing: 0.4px;
+  letter-spacing: 0.3px;
   text-transform: uppercase;
   color: var(--text-mute);
   background: rgba(255,255,255,0.06);
   border: 1px solid var(--hairline-strong);
-  border-radius: 20px;
-  padding: 5px 11px;
+  border-radius: 999px;
+  padding: 6px 13px;
   cursor: pointer;
   transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
 }
@@ -1120,7 +1120,14 @@ body{
 /* NFL's second toggle row (Divisions/Full Conference), stacked right
    under the first (AFC/NFC/Person) — pulled closer so the pair reads as
    one nested choice ("which conference, then how to view it") instead
-   of two unrelated toggle bars. */
+   of two unrelated toggle bars. The first row's own border-bottom would
+   otherwise land in the seam between the two rows, reading as a stray
+   line cutting behind the pills instead of a clean divider before the
+   team list — so drop it whenever a subtoggle row follows. */
+.standings-toggle:has(+ .standings-subtoggle){
+  border-bottom: none;
+}
+
 .standings-subtoggle{
   padding-top: 0;
 }
