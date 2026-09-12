@@ -3,7 +3,7 @@
    result/next fixture, plus the team detail modal and the staggered
    background refresh loop that keeps it all current.
    ============================================================ */
-import { TEAM_META } from './data.js';
+import { TEAM_META, PRIOR_SEASON_DISPLAY_LEAGUES } from './data.js';
 import { fetchJSON, ordinal, formatKickoff, formatUpdatedAt, teamBadgeHtml, lockBodyScroll, unlockBodyScroll } from './utils.js';
 import { API_BASE, fetchRundownEventForTeam, isRundownEventLive, V2_MIGRATED_LEAGUES, UPCOMING_CHIP_LEAGUES, fetchSportsDbV2Team, fetchSportsDbV2Schedule } from './api.js';
 import { fetchEplStandingsTable, findEspnEplRow } from './standings-epl.js';
@@ -43,14 +43,14 @@ const FLAT_SCHEDULE_LEAGUES = {
 // js/espn.js. Short TTL since a live score can move by the second;
 // same cadence TheRundown's own day-cache used.
 const ESPN_SCOREBOARD_TTL_MS = 60 * 1000;
-const espnScoreboardCache = {}; // sportPath -> { events, fetchedAt }
+const espnScoreboardCache = {}; // sportPath -> { data: {events, season}, fetchedAt }
 
 async function fetchEspnScoreboardCached(sportPath){
   const cached = espnScoreboardCache[sportPath];
-  if(cached && (Date.now() - cached.fetchedAt) < ESPN_SCOREBOARD_TTL_MS) return cached.events;
-  const events = await fetchEspnScoreboard(sportPath);
-  espnScoreboardCache[sportPath] = { events, fetchedAt: Date.now() };
-  return events;
+  if(cached && (Date.now() - cached.fetchedAt) < ESPN_SCOREBOARD_TTL_MS) return cached.data;
+  const data = await fetchEspnScoreboard(sportPath);
+  espnScoreboardCache[sportPath] = { data, fetchedAt: Date.now() };
+  return data;
 }
 
 const LIVE_DATA_CACHE_KEY = 'teamDashboardLiveDataCache';
@@ -202,13 +202,14 @@ async function fetchTeamBundle(teamKey){
       await flatSchedule.ensureStandings();
       const row = flatSchedule.findRow(meta);
       if(row){
-        const [info, espnSchedule, scoreboardEvents] = await Promise.all([
+        const [info, espnSchedule, scoreboard] = await Promise.all([
           fetchTeamInfoCached(teamKey, id, useV2),
           fetchEspnTeamSchedule(flatSchedule.sportPath, row.id),
           fetchEspnScoreboardCached(flatSchedule.sportPath)
         ]);
-        const espnLive = findEspnScoreboardLine(scoreboardEvents, row.id);
-        const bundle = { info, last: null, next: null, espnSchedule, espnLive, rundownTeamId: meta.rundownTeamId || null, fetchedAt: new Date() };
+        const espnLive = findEspnScoreboardLine(scoreboard ? scoreboard.events : null, row.id);
+        const espnSeason = scoreboard ? scoreboard.season : null;
+        const bundle = { info, last: null, next: null, espnSchedule, espnLive, espnSeason, rundownTeamId: meta.rundownTeamId || null, fetchedAt: new Date() };
         setTeamBundle(teamKey, bundle);
         return bundle;
       }
@@ -242,6 +243,69 @@ async function fetchTeamBundle(teamKey){
   return bundle;
 }
 
+// Turns ESPN's solid zone hex (e.g. "#81D6AC") into a low-alpha rgba,
+// matching the soft-tint badge look used everywhere else (--win-soft,
+// --loss-soft, etc.) instead of a solid pastel fill with forced dark text.
+function softZoneTint(hex, alpha){
+  const h = hex.replace(/^#+/, '');
+  const r = parseInt(h.substring(0, 2), 16);
+  const g = parseInt(h.substring(2, 4), 16);
+  const b = parseInt(h.substring(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+// ESPN's standard season-phase enum — confirmed against the core API's
+// leagues/{league}/seasons/{year}/types listing (NFL: 1 Preseason 2026-
+// 08-06→09-06, 2 Regular Season 09-06→2027-01-13, 3 Postseason →02-16,
+// 4 Off Season →08-01) — mapped to the modal-head season badge below.
+const ESPN_SEASON_TYPE = {
+  1: { label: 'Pre-Season', cls: 'pre' },
+  2: { label: 'In-Season', cls: 'in' },
+  3: { label: 'Post-Season', cls: 'post' },
+  4: { label: 'Season Complete', cls: 'complete' }
+};
+
+// EPL's ESPN season has no pre/post/off split at all — the core API
+// lists exactly one continuous "types" entry for the whole Aug-May
+// campaign, unlike NFL/NBA/etc's four. So instead of a real
+// season.type, this reads the same schedule already fetched for the
+// modal (bundle.espnSchedule) and infers phase from what's actually on
+// it: nothing played and nothing left means the close season, nothing
+// played yet but fixtures exist means it hasn't kicked off, and
+// everything else (or a full but exhausted fixture list) is scored as
+// either mid-season or wrapped up.
+function eplSeasonStatus(bundle){
+  const sched = bundle.espnSchedule;
+  if(!sched) return null;
+  const played = sched.recent && sched.recent.length > 0;
+  const scheduled = sched.upcoming && sched.upcoming.length > 0;
+  if(!played && !scheduled) return { label: 'Season Complete', cls: 'complete' };
+  if(!played) return { label: 'Pre-Season', cls: 'pre' };
+  if(!scheduled) return { label: 'Season Complete', cls: 'complete' };
+  return { label: 'In-Season', cls: 'in' };
+}
+
+// What phase of its season this team's league is actually in right
+// now — not just "do we have live data hooked up" (that's hasLive in
+// openTeamModal, which only gates whether this badge's slot exists at
+// all). Returns null when there's no reliable signal (college
+// basketball has no ESPN wiring at all — see FLAT_SCHEDULE_LEAGUES —
+// so its bundle carries neither espnSeason nor espnSchedule), in which
+// case the badge stays hidden rather than guessing.
+function seasonStatus(meta, bundle){
+  if(meta.leagueKey === 'epl') return eplSeasonStatus(bundle);
+  if(bundle.espnSeason && ESPN_SEASON_TYPE[bundle.espnSeason.type]) return ESPN_SEASON_TYPE[bundle.espnSeason.type];
+  return null;
+}
+
+function renderSeasonBadge(meta, bundle){
+  const el = document.getElementById('season-badge');
+  if(!el) return;
+  const status = seasonStatus(meta, bundle);
+  el.style.display = status ? 'inline-block' : 'none';
+  el.innerHTML = status ? `<span class="season-badge ${status.cls}">${status.label}</span>` : '';
+}
+
 export function renderStats(meta, bundle){
   const el = document.getElementById('live-stats');
   if(!el) return;
@@ -269,8 +333,9 @@ export function renderStats(meta, bundle){
         // display toggled (not just emptied) so an inactive zone doesn't
         // still eat a flex gap slot in .modal-sub next to it.
         zoneEl.style.display = row.zone ? 'inline-block' : 'none';
+        const zoneColor = row.zoneColor || '#94969E';
         zoneEl.innerHTML = row.zone
-          ? `<span class="zone-tag" style="background:${row.zoneColor || 'rgba(255,255,255,0.14)'};">${row.zone}</span>`
+          ? `<span class="zone-tag" style="color:${zoneColor};background:${softZoneTint(zoneColor, 0.16)};">${row.zone}</span>`
           : '';
       }
       return;
@@ -715,6 +780,7 @@ export function renderLiveBundle(teamKey, bundle){
   const meta = TEAM_META[teamKey];
   if(!meta || !bundle) return;
   renderStats(meta, bundle);
+  renderSeasonBadge(meta, bundle);
   renderForm(meta.sportsdbId, bundle);
   renderNext(meta.sportsdbId, bundle);
   renderUpdatedAt(bundle);
@@ -748,6 +814,13 @@ export function openTeamModal(teamKey){
   const hasLive = !!meta.sportsdbId || !!meta.rundownTeamId;
   const cached = hasLive ? liveDataCache[teamKey] : null;
   const tracker = trackerSectionHtml(teamKey);
+  // MLB/WNBA: the stat strip and results below are ESPN's real, live
+  // '26 data — still worth showing — but this team's drafted record
+  // doesn't start scoring until the '27 season actually begins. See
+  // PRIOR_SEASON_DISPLAY_LEAGUES in js/data.js.
+  const priorSeasonNoteHtml = PRIOR_SEASON_DISPLAY_LEAGUES.includes(meta.leagueKey)
+    ? `<div class="prior-season-note">Showing the '26 season, still in progress — this record won't count towards drafted team point totals until the '27 season.</div>`
+    : '';
 
   modalContent.innerHTML = `
     <div class="modal-accent" style="background:${meta.accent};"></div>
@@ -755,13 +828,14 @@ export function openTeamModal(teamKey){
       ${teamBadgeHtml(meta)}
       <div>
         <h2>${meta.name}</h2>
-        <div class="modal-sub">${meta.sub}${hasLive ? ' <span class="live-badge">LIVE</span>' : ''}${meta.leagueKey === 'epl' ? '<span id="zone-tag" style="display:none;"></span>' : ''}</div>
+        <div class="modal-sub">${meta.sub}${hasLive ? ' <span id="season-badge" style="display:none;"></span>' : ''}${meta.leagueKey === 'epl' ? '<span id="zone-tag" style="display:none;"></span>' : ''}</div>
       </div>
       <button class="modal-close" onclick="closeTeamModal()">&times;</button>
     </div>
     ${hasLive ? `
       <div class="stat-strip" id="live-stats">${cached ? '' : '<div class="stat-cell" style="flex:1;"><div class="lbl">Loading…</div></div>'}</div>
       <div class="modal-body">
+        ${priorSeasonNoteHtml}
         <div class="modal-section-title">${meta.recentLabel || 'Most Recent Result'}</div>
         <div class="form-list" id="live-form">${cached ? '' : '<div class="loading-note">Loading…</div>'}</div>
         <div class="modal-section-title">Next Match</div>

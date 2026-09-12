@@ -511,13 +511,20 @@ export async function fetchEspnTeamSchedule(sportLeaguePath, espnTeamId){
 // (`'pre'`/`'post'` otherwise), and each competitor already carries a
 // live `score` — no separate polling endpoint needed, this one
 // response has today's state for every game at once.
-// Shape returned: [{ id, state, detail, completed, competitors:
-// [{ teamId, teamName, homeAway, score }] }]
+// Also carries `season` straight off the same response — ESPN's
+// standard {type, year} enum (1 Preseason/2 Regular Season/3
+// Postseason/4 Off Season, confirmed against the core API's
+// leagues/{league}/seasons/{year}/types listing) — so the modal-head
+// season badge (see seasonStatusLabel in js/live-data.js) piggybacks
+// on this same request instead of needing its own.
+// Shape returned: { events: [{ id, state, detail, completed,
+// competitors: [{ teamId, teamName, homeAway, score }] }], season:
+// { type, year } | null }
 export async function fetchEspnScoreboard(sportLeaguePath){
   const data = await fetchEspnJSON(`/apis/site/v2/sports/${sportLeaguePath}/scoreboard`);
-  if(!data || !Array.isArray(data.events)) return null;
+  if(!data) return null;
 
-  return data.events.map(event => {
+  const events = Array.isArray(data.events) ? data.events.map(event => {
     const comp = event.competitions && event.competitions[0];
     if(!comp) return null;
     const statusType = comp.status && comp.status.type;
@@ -534,7 +541,9 @@ export async function fetchEspnScoreboard(sportLeaguePath){
       completed: !!(statusType && statusType.completed),
       competitors
     };
-  }).filter(Boolean);
+  }).filter(Boolean) : [];
+
+  return { events, season: data.season || null };
 }
 
 // Given today's scoreboard (fetchEspnScoreboard above) and one team's

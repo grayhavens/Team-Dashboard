@@ -278,6 +278,17 @@ export const LEAGUES = [
   { key:'wnba', label:'WNBA', season:"'27 Season", teams:['isaac_mercury', 'drew_sky', 'douglas_lynx', 'collin_dream', 'erichylok_liberty', 'valkyries', 'patrick_wings', 'peter_aces', 'ericprister_mystics', 'donny_fever'] }
 ];
 
+// MLB and WNBA drafted teams score starting with the '27 season (see
+// their LEAGUES season labels above — "'27 Season" only, not "'26/'27"
+// like EPL/NBA/NHL/mcbb) — but ESPN's live standings/schedule
+// endpoints always return whatever season is actually being played
+// right now, which today is still each league's '26 season. Until
+// each league's '27 season actually starts, the Standings tab and
+// team modal are showing real '26 results that don't count toward the
+// draft — flagged here so js/board.js and js/live-data.js can both
+// surface the same heads-up instead of drifting out of sync.
+export const PRIOR_SEASON_DISPLAY_LEAGUES = ['mlb', 'wnba'];
+
 export const LEAGUE_SCORING = {
   epl: {
     name: 'EPL',

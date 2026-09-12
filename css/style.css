@@ -243,6 +243,20 @@ body{
   letter-spacing: 0.2px;
 }
 
+/* MLB/WNBA-only heads-up (see PRIOR_SEASON_DISPLAY_LEAGUES in
+   js/data.js): the records below are real, but they're last season's
+   — drafted teams don't start scoring until '27. Lives as a third line
+   inside .league-tab.standings-league-tab's own column/gap, same
+   italic/muted treatment as .no-live-note so it reads as an aside
+   rather than an error. */
+.prior-season-note{
+  font-size: 11.5px;
+  font-style: italic;
+  color: var(--text-sub);
+  line-height: 1.4;
+  margin-bottom: 14px;
+}
+
 .team{
   display:flex;
   align-items:center;
@@ -1026,20 +1040,41 @@ body{
   background: var(--loss-soft);
 }
 
+/* Modal-head season-phase badge (see seasonStatus/renderSeasonBadge in
+   js/live-data.js) — same soft-badge shape as .live-badge, one tint
+   per phase so Pre/In/Post-Season and Season Complete read apart at a
+   glance without needing the label alone to carry it. */
+.season-badge{
+  display: inline-block;
+  font-family: 'Manrope', sans-serif;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  border-radius: 20px;
+  padding: 2px 7px;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+.season-badge.pre{ color: var(--provisional); background: var(--provisional-soft); }
+.season-badge.in{ color: var(--win); background: var(--win-soft); }
+.season-badge.post{ color: var(--accent); background: var(--accent-soft); }
+.season-badge.complete{ color: var(--record); background: var(--record-soft); }
+
 /* EPL qualification-zone tag (Champions League/Europa League/
-   Relegation) — background comes from ESPN's own note.color per team
-   (see renderStats in js/live-data.js), a different pastel per zone,
-   so text stays a fixed dark color rather than a CSS variable. */
+   Relegation) — color and background come from ESPN's own note.color
+   per team (see softZoneTint/renderStats in js/live-data.js): a
+   low-alpha tint of that color behind full-strength text, same
+   soft-badge look as .live-badge, rather than a solid pastel fill. */
 .zone-tag{
   display: inline-block;
   font-family: 'Manrope', sans-serif;
   font-size: 9px;
   font-weight: 700;
   letter-spacing: 0.3px;
-  color: #0A0B0D;
   border-radius: 20px;
   padding: 2px 7px;
   vertical-align: middle;
+  white-space: nowrap;
 }
 
 .no-live-note{
