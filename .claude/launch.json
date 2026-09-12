@@ -4,7 +4,7 @@
     {
       "name": "team-dashboard",
       "runtimeExecutable": "python3",
-      "runtimeArgs": ["-c", "import sys; sys.path = [p for p in sys.path if p]; import functools, http.server; http.server.ThreadingHTTPServer(('0.0.0.0', 8934), functools.partial(http.server.SimpleHTTPRequestHandler, directory='/Users/joshgonshor/Documents/boxscorethedraft')).serve_forever()"],
+      "runtimeArgs": ["-c", "import sys, os\nsys.path = [p for p in sys.path if p]\nimport functools, http.server as hs\n_orig_end_headers = hs.SimpleHTTPRequestHandler.end_headers\ndef _end_headers(self):\n    self.send_header('Cache-Control', 'no-store')\n    _orig_end_headers(self)\nhs.SimpleHTTPRequestHandler.end_headers = _end_headers\npreview_dir = os.path.join(os.environ.get('TMPDIR', '/tmp'), 'boxscorethedraft-preview')\nhs.ThreadingHTTPServer(('0.0.0.0', 8934), functools.partial(hs.SimpleHTTPRequestHandler, directory=preview_dir)).serve_forever()\n"],
       "port": 8934
     }
   ]

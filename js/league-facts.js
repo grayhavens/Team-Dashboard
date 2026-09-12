@@ -298,7 +298,7 @@ function trackerHeadHtml(teamKey, totalHtml, expanded){
   return `
     <div class="tracker-head" onclick="toggleTrackerSection('${teamKey}')">
       <div>
-        <div class="modal-section-title">Track This Season</div>
+        <div class="modal-section-title">Draft Points</div>
         <div class="tracker-total">${totalHtml}</div>
       </div>
       <div class="tracker-chevron ${expanded ? 'open' : ''}">${CHEVRON_ICON_SVG}</div>

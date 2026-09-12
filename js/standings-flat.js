@@ -241,7 +241,7 @@ export function createFlatStandingsBoard(opts){
     return `
       <div class="standings-toggle">
         ${buttons}
-        <button class="toggle-btn ${mode === 'byDrafter' ? 'active' : ''}" onclick="${setModeGlobalName}('byDrafter')">Person</button>
+        <button class="toggle-btn ${mode === 'byDrafter' ? 'active' : ''}" onclick="${setModeGlobalName}('byDrafter')">Drafted</button>
       </div>
     `;
   }

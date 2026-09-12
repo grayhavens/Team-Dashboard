@@ -318,7 +318,7 @@ export function nflStandingsToggleHtml(){
     <div class="standings-toggle">
       <button class="toggle-btn ${nflStandingsMode === 'afc' ? 'active' : ''}" onclick="setNflStandingsMode('afc')">AFC</button>
       <button class="toggle-btn ${nflStandingsMode === 'nfc' ? 'active' : ''}" onclick="setNflStandingsMode('nfc')">NFC</button>
-      <button class="toggle-btn ${nflStandingsMode === 'byDrafter' ? 'active' : ''}" onclick="setNflStandingsMode('byDrafter')">Person</button>
+      <button class="toggle-btn ${nflStandingsMode === 'byDrafter' ? 'active' : ''}" onclick="setNflStandingsMode('byDrafter')">Drafted</button>
     </div>
   `;
   if(nflStandingsMode === 'byDrafter') return topRow;
