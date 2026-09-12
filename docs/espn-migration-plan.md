@@ -1,8 +1,9 @@
 # ESPN hidden API — evaluation & migration plan
 
 **Status: everything below is live except College Basketball (see "Second migration wave," phase E) —
-every league now reads ESPN for standings/rankings, schedule, and live in-game state except CBB
-(no ESPN integration built yet) and CFB's one FCS team, NDSU (a narrow TheRundown fallback).**
+every league now reads ESPN for standings/rankings, schedule, and live in-game state except CBB (no
+ESPN integration built for it yet). TheSportsDB has no remaining callers in normal operation at all —
+see "SportsDB fully deprecated (2026-09-12)" below.**
 **Code:** [`js/espn.js`](../js/espn.js) and [`js/standings-flat.js`](../js/standings-flat.js), wired
 into every league's own `js/standings-*.js` file and `js/live-data.js`.
 
@@ -252,11 +253,12 @@ decision, not a technical one, and shelved for now.
 
 ## What stays on TheRundown
 
-**Superseded — see "Second migration wave" below.** Live in-game state moved off TheRundown too, onto
-ESPN's scoreboard endpoint, for every league that has an ESPN standings-based team-id mapping (EPL,
-NFL, CFB, NBA, NHL, MLB, WNBA). TheRundown's only remaining callers are College Basketball (no ESPN
-integration built for it yet — see that section) and CFB's one FCS team, NDSU, as a per-team fallback
-where ESPN's FBS-only data has no row.
+**Superseded — see "Second migration wave" and "SportsDB fully deprecated" below.** Live in-game state
+moved off TheRundown too, onto ESPN's scoreboard endpoint, for every league that has an ESPN
+standings-based team-id mapping (EPL, NFL, CFB, NBA, NHL, MLB, WNBA). TheRundown's only remaining
+caller in normal operation is College Basketball (no ESPN integration built for it yet — see that
+section); CFB's NDSU no longer needs it (see below) but a defensive fallback to it stays in place for
+if ESPN's per-team fetch for NDSU ever fails on a given refresh.
 
 ## If this holds up: what Phase 2+ removes
 
@@ -343,6 +345,70 @@ board pill and the team modal, live, mid-game.
 **What this leaves on TheRundown:** College Basketball (no ESPN integration built for it at all yet —
 it has no standings/schedule source today either, TheSportsDB never carried it; giving it the same
 treatment as the other 7 leagues is a real follow-up but a bigger lift, since there's no existing
-schedule/standings scaffolding to extend the way there was here) and CFB's one FCS team, NDSU (phase
-C's fallback). Every other league's per-team live/schedule/record fetch no longer touches TheRundown's
-shared daily quota at all.
+schedule/standings scaffolding to extend the way there was here). CFB's NDSU no longer needs it — see
+"SportsDB fully deprecated" below. Every other league's per-team live/schedule/record fetch no longer
+touches TheRundown's shared daily quota at all.
+
+## SportsDB fully deprecated (2026-09-12)
+
+Audited every remaining TheSportsDB call site after the second migration wave above, prompted by a
+direct ask to confirm the API could be fully retired. Two real gaps turned up, both now closed:
+
+1. **NDSU (CFB) never actually needed to fall back to TheSportsDB.** Phase D above accepted NDSU
+   falling through to the generic TheSportsDB schedule branch since ESPN's FBS-only standings endpoint
+   has no row for an FCS program. But ESPN's *individual* team endpoint
+   (`/apis/site/v2/sports/football/college-football/teams/{id}?enable=record`) works for any team id
+   regardless of division — confirmed live for NDSU (espn id `2449`), CORS-open, same host family as
+   `fetchEspnTeamSchedule`. Added `fetchEspnCfbTeamRecord` (`js/espn.js`) and inject its result as a
+   plain extra row into `espnCfbRecordsCache.rows` (`js/standings-cfb.js`'s `NDSU_ESPN_TEAM_ID`/
+   `fetchEspnCfbRecordsCached`) — `findEspnCfbRow`/`findCfbRecord` and `FLAT_SCHEDULE_LEAGUES.cfb`'s
+   `findRow` in `js/live-data.js` all pick it up for free from there, so NDSU now gets a real record,
+   AP-rank lookup, and full ESPN schedule (with real venue/broadcast) exactly like every FBS team,
+   and never reaches the TheSportsDB branch in `fetchTeamBundle` in normal operation. TheRundown's
+   `cfbRecordsCache` fallback in `findCfbRecord` stays as a defensive fallback for if this one team's
+   fetch ever fails on a given refresh — everything else in this app's "graceful degradation instead
+   of a hard dependency" pattern works the same way.
+
+2. **The same audit found a second, unrelated FBS-standings gap while checking every drafted team
+   against a live pull:** `fetchEspnCfbFullStandings`'s conference walk only read `standings.entries`
+   directly off each conference node — true for 10 of ESPN's 11 CFB conferences, but the Sun Belt
+   Conference nests its East/West divisions one level deeper instead (confirmed live: the top-level
+   "Sun Belt Conference" node has 0 direct entries but 2 child groups that do), so all ~14 Sun Belt
+   teams silently had no row at all — caught via James Madison (`ericprister_jamesmadison`) showing no
+   record despite being FBS. Fixed by making that walk recurse into `children` when a conference has no
+   direct entries, rather than a one-off special case for Sun Belt specifically.
+
+3. **The bigger volume fix: `fetchTeamBundle`'s ESPN-schedule branch (`js/live-data.js`) was still
+   fetching TheSportsDB's `info` (team bio: Sport/Founded/Stadium) unconditionally for every team that
+   resolves via ESPN** — i.e. every drafted team in all 7 migrated leagues, every refresh tick. But
+   `renderStats` always renders that league's real ESPN record branch first and returns before ever
+   reaching the `bundle.info` fallback, for every league with an ESPN branch — so that fetch's result
+   was never actually displayed for any team on this path. Removed the `fetchTeamInfoCached` call from
+   that branch entirely; it's still fetched by the generic legacy branch below it, which remains the
+   real fallback for any future team that doesn't resolve an ESPN row at all.
+
+With NDSU (1) and Sun Belt (2) both fixed, every one of this app's currently drafted teams across all
+7 ESPN-migrated leagues resolves a real ESPN row — verified by cross-checking all ~200 drafted teams'
+`TEAM_META` names against a live pull of each league's ESPN standings/matching field. That means
+`fetchTeamBundle`'s generic TheSportsDB branch (`fetchSportsDbV2Team`/`fetchSportsDbV2Schedule`/
+`API_BASE`'s v1 `lookupteam.php`/`eventslast.php`/`eventsnext.php`) is provably unreachable for the
+current roster — kept only as scaffolding for a genuinely new future gap (e.g. next season's draft
+picking up another lower-division team), the same reasoning that already kept TheRundown's NDSU
+fallback in place after (1). Nothing in this app makes a TheSportsDB call in normal operation today.
+
+**Bonus fix found by the same audit: most NBA/NHL/MLB/WNBA teams' modals were showing a permanent
+"not hooked up yet" placeholder instead of real data, unrelated to TheSportsDB.** Only Josh's own 21
+teams were ever given a real `sportsdbId`/`rundownTeamId` in `TEAM_META` — every other drafter's team
+in those 4 leagues (~100 teams) has neither field, a pre-existing gap that predates this migration.
+Their board-card record already worked (it comes from `js/standings-flat.js`'s name/nickname matching,
+independent of `sportsdbId`), but `openTeamModal`'s `hasLive` gate and `fetchTeamBundle`'s ESPN branch
+were both still keyed on `meta.sportsdbId`/`meta.rundownTeamId` being set, wrapping the *entire* ESPN
+path in `if(meta.sportsdbId)` — so a team with a real ESPN row but no `sportsdbId` never got there at
+all. Fixed by moving the `FLAT_SCHEDULE_LEAGUES` check (and its own `if(row)` gate) ahead of the
+`sportsdbId`/`rundownTeamId` check in `fetchTeamBundle`, and adding
+`!!FLAT_SCHEDULE_LEAGUES[meta.leagueKey]` to `hasLive` in `openTeamModal` — both in `js/live-data.js`.
+Verified live: the Brewers (`drew_brewers`, no sportsdbId) now show a real 92-56 record, form strip,
+last result, and next match with real venue/broadcast, same as any team with a `sportsdbId` always did.
+Scoped to the 7 `FLAT_SCHEDULE_LEAGUES` leagues only — College Basketball still has no ESPN integration
+at all (see phase E), so its teams without a `rundownTeamId` still show the placeholder, correctly:
+there's genuinely no data source for them yet.

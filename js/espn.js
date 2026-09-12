@@ -353,30 +353,69 @@ export async function fetchEspnCfbFullStandings(){
   if(!data || !Array.isArray(data.children)) return null;
 
   const rows = [];
-  data.children.forEach(conf => {
-    const entries = (conf.standings && conf.standings.entries) || [];
-    entries.forEach(entry => {
-      // Unlike NFL/NBA/NHL/MLB, CFB's stats array has no flat "losses"
-      // field at all — confirmed live (2026-09-12), Oregon's array has
-      // wins=1 but nothing named "losses". What it does have is several
-      // named per-split records (home/division/vs-AP-ranked/etc, each
-      // with its own `summary` like "1-0"), one of which is `overall` —
-      // that's the real season record, parsed the same "W-L" string way
-      // parseWinLossRecord (js/standings-cfb.js) already parses
-      // TheRundown's identically-shaped record string.
-      const overall = (entry.stats || []).find(s => s.name === 'overall');
-      const m = overall && /^(\d+)-(\d+)/.exec(overall.summary || '');
-      if(!m) return;
-      rows.push({
-        id: entry.team.id,
-        location: entry.team.location,
-        teamName: espnTeamName(entry.team),
-        wins: parseInt(m[1], 10),
-        losses: parseInt(m[2], 10)
+  function walk(group){
+    const entries = (group.standings && group.standings.entries) || [];
+    if(entries.length){
+      entries.forEach(entry => {
+        // Unlike NFL/NBA/NHL/MLB, CFB's stats array has no flat "losses"
+        // field at all — confirmed live (2026-09-12), Oregon's array has
+        // wins=1 but nothing named "losses". What it does have is several
+        // named per-split records (home/division/vs-AP-ranked/etc, each
+        // with its own `summary` like "1-0"), one of which is `overall` —
+        // that's the real season record, parsed the same "W-L" string way
+        // parseWinLossRecord (js/standings-cfb.js) already parses
+        // TheRundown's identically-shaped record string.
+        const overall = (entry.stats || []).find(s => s.name === 'overall');
+        const m = overall && /^(\d+)-(\d+)/.exec(overall.summary || '');
+        if(!m) return;
+        rows.push({
+          id: entry.team.id,
+          location: entry.team.location,
+          teamName: espnTeamName(entry.team),
+          wins: parseInt(m[1], 10),
+          losses: parseInt(m[2], 10)
+        });
       });
-    });
-  });
+    } else if(Array.isArray(group.children)){
+      // Every conference lists its entries directly except one: the Sun
+      // Belt Conference nests its East/West divisions one level deeper
+      // instead (confirmed live 2026-09-11 — its own node here has 0
+      // direct entries but 2 child groups that do), silently dropping
+      // all ~14 of its teams, James Madison included, before this walked
+      // in. Recursing here picks up that shape (and any future
+      // conference ESPN nests the same way) instead of a one-off
+      // special case for just Sun Belt.
+      group.children.forEach(walk);
+    }
+  }
+  data.children.forEach(walk);
   return rows;
+}
+
+// One-off per-team record fetch — the only drafted CFB team this can't
+// cover is already covered above; this exists for the one it can't:
+// NDSU (js/standings-cfb.js's NDSU_ESPN_TEAM_ID), an FCS program the
+// standings endpoint above never lists at all (FBS-only, unlike the Sun
+// Belt nesting bug fixed above). ESPN's individual team endpoint has no
+// such FBS/FCS split, so this works for any team id regardless of
+// division. Same CORS-open /apis/site/v2/ family as fetchEspnTeamSchedule
+// (the sibling /apis/v2/ path returned 404 here, confirmed live) — no
+// worker proxy needed.
+// Shape returned: [{ id, location, teamName, wins, losses }] | null
+export async function fetchEspnCfbTeamRecord(espnTeamId){
+  const data = await fetchEspnJSON(`/apis/site/v2/sports/football/college-football/teams/${espnTeamId}?enable=record`);
+  const team = data && data.team;
+  const items = team && team.record && team.record.items;
+  const overall = Array.isArray(items) && items.find(i => i.type === 'total');
+  const m = overall && /^(\d+)-(\d+)/.exec(overall.summary || '');
+  if(!team || !m) return null;
+  return {
+    id: team.id,
+    location: team.location,
+    teamName: espnTeamName(team),
+    wins: parseInt(m[1], 10),
+    losses: parseInt(m[2], 10)
+  };
 }
 
 // Real EPL table, all 20 clubs — verified live (2026-09-11): carries
