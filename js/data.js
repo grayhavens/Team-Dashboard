@@ -48,7 +48,7 @@ export const TEAM_META = {
 
   cavaliers:  { name:'Cavaliers',   leagueKey:'nba',  draftTeamId:'josh', boardSub:'Cleveland',   sub:"NBA · Cleveland · '26/'27 Season", accent:'#860038', badgeStyle:'background:#860038; color:#FDBB30;', badgeText:'CLE',  sportsdbId:'134871', rundownTeamId:7 },
   nuggets:    { name:'Nuggets',     leagueKey:'nba',  draftTeamId:'josh', boardSub:'Denver',      sub:"NBA · Denver · '26/'27 Season",   accent:'#0E2240', badgeStyle:'background:#0E2240; color:#FEC524;', badgeText:'DEN',  sportsdbId:'134885', rundownTeamId:16 },
-  mavericks:  { name:'Mavs',        leagueKey:'nba',  draftTeamId:'josh', boardSub:'Dallas',      sub:"NBA · Dallas · '26/'27 Season",   accent:'#00538C', badgeStyle:'background:#00538C; color:#B8C4CA;', badgeText:'DAL',  sportsdbId:'134875', rundownTeamId:26 },
+  mavericks:  { name:'Mavericks',   leagueKey:'nba',  draftTeamId:'josh', boardSub:'Dallas',      sub:"NBA · Dallas · '26/'27 Season",   accent:'#00538C', badgeStyle:'background:#00538C; color:#B8C4CA;', badgeText:'DAL',  sportsdbId:'134875', rundownTeamId:26 },
 
   lightning:  { name:'Lightning',   leagueKey:'nhl',  draftTeamId:'josh', boardSub:'Tampa Bay',   sub:"NHL · Tampa Bay · '26/'27 Season", accent:'#002868', badgeStyle:'background:#002868; color:#FFFFFF;', badgeText:'TBL',  sportsdbId:'134836', rundownTeamId:105 },
   flyers:     { name:'Flyers',      leagueKey:'nhl',  draftTeamId:'josh', boardSub:'Philadelphia', sub:"NHL · Philadelphia · '26/'27 Season", accent:'#F74902', badgeStyle:'background:#F74902; color:#000000;', badgeText:'PHI',  sportsdbId:'134843', rundownTeamId:96 },

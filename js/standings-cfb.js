@@ -7,29 +7,28 @@
    returns genuinely empty (confirmed 2026-09-10, see the migration
    plan). So there's no "League" table view possible here, only "Person".
 
-   TheRundown's per-sport team list — the same endpoint already used to
-   help map rundownTeamId in js/data.js — carries a "record" field
-   ("10-7") and, for the current Top 25, a "ranking" field per team.
-   One shared fetch for the whole league (mirrors eplStandingsCache:
-   one call, not one per team), reusing the existing /teams/{sportId}
-   worker route. This still backs the "Person" (combined win%) view.
+   Both the AP Top 25 (computeCfbRankingTable/renderCfbRankingRow) and
+   full-roster win-loss records (findCfbRecord — the board card, the
+   team modal stat strip, and the "Person" combined-win% view) read
+   ESPN's hidden API (js/espn.js) now, not TheRundown — see
+   docs/espn-migration-plan.md's Phase 2 (rankings) and the CFB phase
+   further down that doc (records). Why: TheRundown's daily data-point
+   budget is shared across all 8 leagues and can (did, on 2026-09-11)
+   run out entirely, taking every CFB view down along with everything
+   else on it; ESPN's endpoints have no key and no observed limit, and
+   are CORS-open, so they're fetched directly here — no worker proxy
+   needed, unlike TheRundown below.
 
-   The AP Top 25 view itself (below, computeCfbRankingTable/
-   renderCfbRankingRow) has moved OFF TheRundown and onto ESPN's hidden
-   API (js/espn.js) instead — see docs/espn-migration-plan.md's Phase 2.
-   Why: TheRundown's daily data-point budget is shared across all 8
-   leagues and can (did, on 2026-09-11) run out entirely, taking the
-   ranking view down along with everything else on it; ESPN's endpoint
-   has no key and no observed limit, and is CORS-open, so it's fetched
-   directly here — no worker proxy needed, unlike everything else in
-   this file. Its ranked-team records come from ESPN too (not
-   cfbRecordsCache below), so the ranking view keeps working even during
-   a TheRundown outage like today's.
+   TheRundown's per-sport team list (cfbRecordsCache) — the same
+   endpoint already used to help map rundownTeamId in js/data.js —
+   still backs exactly one case: findCfbRecord falls back to it for a
+   drafted CFB team ESPN's FBS-only standings doesn't cover (NDSU, an
+   FCS program). Every other CFB team resolves through ESPN.
    ============================================================ */
 import { LEAGUES, TEAM_META, DRAFT_TEAMS, LEAGUE_SCORING } from './data.js';
 import { fetchJSON, teamBadgeHtml, abbrFromName } from './utils.js';
 import { DASHBOARD_WORKER_BASE, RUNDOWN_SPORT_ID } from './api.js';
-import { fetchEspnCfbRankings } from './espn.js';
+import { fetchEspnCfbRankings, fetchEspnCfbFullStandings } from './espn.js';
 import { renderStandings } from './board.js';
 import { liveDataCache, renderStats } from './live-data.js';
 
@@ -111,14 +110,16 @@ export function fetchCfbRecords(){
 }
 
 // Record (and AP rank, if any) shown on each CFB team's board row —
-// same cfbRecordsCache the Standings tab already fetches, just painted
+// reads findCfbRecord below (ESPN-first, TheRundown fallback for the
+// one FCS team ESPN's FBS-only standings doesn't cover), just painted
 // onto the per-team span rather than re-rendering the whole board (see
 // renderRowStatus in js/live-data.js for the same targeted-update
 // pattern).
 export function cfbRecordLabel(meta){
-  const rec = meta.rundownTeamId ? (cfbRecordsCache.byTeamId || {})[meta.rundownTeamId] : null;
-  if(!rec || !rec.record) return '';
-  return typeof rec.ranking === 'number' ? `#${rec.ranking} &middot; ${rec.record}` : rec.record;
+  const rec = findCfbRecord(meta);
+  if(!rec || rec.wins === null) return '';
+  const record = `${rec.wins}-${rec.losses}`;
+  return typeof rec.ranking === 'number' ? `#${rec.ranking} &middot; ${record}` : record;
 }
 
 export function renderCfbCardRecord(teamKey){
@@ -206,6 +207,107 @@ function findCfbTeamKeyByEspnLocation(location){
   return teams.find(teamKey => normalizeTeamName(TEAM_META[teamKey].name) === wanted) || null;
 }
 
+// ---- Full-roster records (ESPN-sourced, replacing TheRundown for the
+// 29 of 30 drafted CFB teams that are FBS — see the file header
+// comment and findCfbRecord below) ----
+
+const ESPN_CFB_RECORDS_CACHE_KEY = 'teamDashboardEspnCfbRecordsCache';
+// Same hourly cadence as the AP rankings cache above — a team's record
+// only changes after its own game, but there's no reason to let this
+// one go stale longer just because it's a bigger payload (124 teams).
+const ESPN_CFB_RECORDS_TTL_MS = 60 * 60 * 1000;
+export const espnCfbRecordsCache = { rows: null, error: false, loading: false, fetchedAt: null };
+let espnCfbRecordsPromise = null;
+
+function espnCfbRecordsIsFresh(){
+  return !!espnCfbRecordsCache.rows && !!espnCfbRecordsCache.fetchedAt && (Date.now() - espnCfbRecordsCache.fetchedAt) < ESPN_CFB_RECORDS_TTL_MS;
+}
+
+function saveEspnCfbRecordsCache(){
+  try { localStorage.setItem(ESPN_CFB_RECORDS_CACHE_KEY, JSON.stringify(espnCfbRecordsCache)); } catch (e){}
+}
+
+export function loadEspnCfbRecordsCache(){
+  try {
+    const raw = localStorage.getItem(ESPN_CFB_RECORDS_CACHE_KEY);
+    if(!raw) return;
+    const parsed = JSON.parse(raw);
+    if(parsed && parsed.rows){
+      espnCfbRecordsCache.rows = parsed.rows;
+      espnCfbRecordsCache.fetchedAt = parsed.fetchedAt || null;
+    }
+  } catch (e){}
+}
+
+export function fetchEspnCfbRecordsCached(){
+  if(espnCfbRecordsCache.loading) return espnCfbRecordsPromise;
+  if(espnCfbRecordsIsFresh()) return Promise.resolve();
+
+  espnCfbRecordsCache.loading = true;
+  espnCfbRecordsPromise = (async () => {
+    const rows = await fetchEspnCfbFullStandings();
+    espnCfbRecordsCache.loading = false;
+    if(rows && rows.length){
+      espnCfbRecordsCache.rows = rows;
+      espnCfbRecordsCache.error = false;
+      espnCfbRecordsCache.fetchedAt = Date.now();
+      saveEspnCfbRecordsCache();
+    } else if(!espnCfbRecordsCache.rows){
+      // Same "don't blank out a good cache on a transient miss" rule as
+      // cfbRecordsCache above.
+      espnCfbRecordsCache.error = true;
+    }
+    renderStandings();
+    renderAllCfbCardRecords();
+    const activeTeam = document.getElementById('modal-content').dataset.activeTeam;
+    const activeMeta = activeTeam && TEAM_META[activeTeam];
+    if(activeMeta && activeMeta.leagueKey === 'cfb'){
+      renderStats(activeMeta, liveDataCache[activeTeam] || {});
+    }
+  })();
+  return espnCfbRecordsPromise;
+}
+
+// Reverse direction of findCfbTeamKeyByEspnLocation — given a drafted
+// team's own meta, find its row in the ESPN full-standings cache. The
+// override table is checked both ways since a drafted team's own name
+// (e.g. "IU") is the override's *output*, not its key ("Indiana").
+// Exported for js/live-data.js too — it's also how fetchTeamBundle
+// resolves this team's ESPN id for the schedule fetch (a null return,
+// e.g. for NDSU, means that team falls back to the generic TheSportsDB
+// schedule branch there instead of getting no schedule at all).
+export function findEspnCfbRow(meta){
+  const rows = espnCfbRecordsCache.rows;
+  if(!rows) return null;
+  const reverseOverride = Object.keys(CFB_ESPN_NAME_OVERRIDES).find(loc => CFB_ESPN_NAME_OVERRIDES[loc] === meta.name);
+  const wanted = normalizeTeamName(reverseOverride || meta.name);
+  return rows.find(row => normalizeTeamName(row.location) === wanted) || null;
+}
+
+// The real win-loss record (and AP Top 25 rank, if any) for a drafted
+// CFB team — ESPN's full FBS standings first, falling back to
+// TheRundown's cfbRecordsCache only when ESPN has no row at all, which
+// today means exactly one drafted team: NDSU, an FCS program outside
+// ESPN's FBS-only standings endpoint. Every other CFB team resolves
+// through ESPN, off TheRundown's shared daily quota entirely.
+export function findCfbRecord(meta){
+  const espnRow = findEspnCfbRow(meta);
+  if(espnRow){
+    const rankRow = (espnCfbRankingsCache.ranks || []).find(r => normalizeTeamName(r.location) === normalizeTeamName(espnRow.location));
+    return { wins: espnRow.wins, losses: espnRow.losses, ranking: rankRow ? rankRow.rank : null };
+  }
+  const rec = meta.rundownTeamId ? (cfbRecordsCache.byTeamId || {})[meta.rundownTeamId] : null;
+  if(rec && rec.record){
+    const parsed = parseWinLossRecord(rec.record);
+    return {
+      wins: parsed ? parsed.wins : null,
+      losses: parsed ? parsed.losses : null,
+      ranking: typeof rec.ranking === 'number' ? rec.ranking : null
+    };
+  }
+  return null;
+}
+
 // ranks is already sorted 1-25 by ESPN — nothing left to compute here,
 // this just exists so board.js doesn't need to know the cache's shape.
 export function computeCfbRankingTable(){
@@ -218,10 +320,13 @@ export function renderCfbRankingRow(rank){
   // badge), but ESPN's own logoUrl covers that — same real-crest
   // treatment drafted teams get, teamBadgeHtml's onerror handler falls
   // back to the plain monogram below if it ever fails to load.
+  // School name only ("Alabama"), not the full "Alabama Crimson Tide" —
+  // keeps undrafted rows consistent with how every drafted CFB team's
+  // own TEAM_META.name is styled (school-only) across this app.
   const meta = teamKey ? TEAM_META[teamKey] : {
-    name: rank.teamName,
+    name: rank.location || rank.teamName,
     badgeStyle: 'background: rgba(255,255,255,0.08); color: var(--text-sub); border-color: var(--hairline-strong);',
-    badgeText: abbrFromName(rank.teamName),
+    badgeText: abbrFromName(rank.location || rank.teamName),
     badgeUrl: rank.logoUrl || null
   };
   const draftedByHtml = teamKey
@@ -279,12 +384,10 @@ export function computeCfbDrafterCombined(){
     byDrafter[meta.draftTeamId].teamNames.push(meta.name);
   });
 
-  const byTeamId = cfbRecordsCache.byTeamId || {};
   league.teams.forEach(teamKey => {
     const meta = TEAM_META[teamKey];
-    const team = meta.rundownTeamId ? byTeamId[meta.rundownTeamId] : null;
-    const rec = team && parseWinLossRecord(team.record);
-    if(!rec) return;
+    const rec = findCfbRecord(meta);
+    if(!rec || rec.wins === null) return;
     const bucket = byDrafter[meta.draftTeamId];
     bucket.wins += rec.wins;
     bucket.losses += rec.losses;

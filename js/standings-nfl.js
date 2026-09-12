@@ -261,8 +261,11 @@ export function renderNflStandingsRow(row, rank){
   // Same idea as CFB's renderCfbRankingRow: an undrafted team has no
   // SportsDB badge, but ESPN's own logoUrl covers it — real crest,
   // same onerror fallback to the plain monogram if it ever fails.
+  // Mascot only ("Browns"), not the full "Cleveland Browns" — keeps
+  // undrafted rows consistent with how every drafted team's own
+  // TEAM_META.name is styled (mascot-only) across this app.
   const meta = teamKey ? TEAM_META[teamKey] : {
-    name: row.teamName,
+    name: row.teamNickname || row.teamName,
     badgeStyle: 'background: rgba(255,255,255,0.08); color: var(--text-sub); border-color: var(--hairline-strong);',
     badgeText: row.abbreviation || abbrFromName(row.teamName),
     badgeUrl: row.logoUrl || null

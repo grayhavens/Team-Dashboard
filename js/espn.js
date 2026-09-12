@@ -79,6 +79,52 @@ function espnTeamName(team){
   return team.displayName || `${team.location || ''} ${team.name || ''}`.trim() || team.location || '';
 }
 
+// Shared by every "flat" (conference-grouped, no division nesting)
+// standings puller — NFL, NBA, NHL, MLB and WNBA all share this exact
+// response shape: one or more `children` groups (conferences/leagues),
+// each with a `standings.entries` array of {team, stats[]}. Real
+// division-by-division grouping (NFL only, so far — see
+// fetchEspnNflDivisionStandings below) needs the much heavier
+// hypermedia "core" API instead; this only covers the cheap, flat,
+// one-request case every sport's board cards/team modal/"Person" view
+// actually need.
+// Returns raw rows: [{ id, conference, conferenceAbbr, teamName,
+// abbreviation, logoUrl, stats: {name: value} }] — callers pick the
+// specific stat names their sport actually displays, since those
+// differ (NHL's otLosses/points, MLB's ties/gamesBehind, NBA/WNBA's
+// winPercent/playoffSeed, etc — verified live per sport, see
+// docs/espn-migration-plan.md).
+async function fetchEspnFlatStandings(path){
+  const data = await fetchEspnJSON(path);
+  if(!data || !Array.isArray(data.children)) return null;
+
+  const rows = [];
+  data.children.forEach(conf => {
+    const entries = (conf.standings && conf.standings.entries) || [];
+    entries.forEach(entry => {
+      const stats = {};
+      (entry.stats || []).forEach(s => { stats[s.name] = s.value; });
+      rows.push({
+        id: entry.team.id,
+        conference: conf.name,
+        conferenceAbbr: conf.abbreviation,
+        teamName: espnTeamName(entry.team),
+        // The bare nickname ("Cavaliers"), no city — matches this app's
+        // own TEAM_META.name exactly (see findFlatTeamKey in
+        // js/standings-flat.js). teamName above is the full "Cleveland
+        // Cavaliers" for display; matching against that instead would
+        // need substring logic, which had a real false positive here
+        // ("Nets" is a literal substring of "Hornets").
+        teamNickname: entry.team.name,
+        abbreviation: entry.team.abbreviation,
+        logoUrl: espnLogoUrl(entry.team),
+        stats
+      });
+    });
+  });
+  return rows;
+}
+
 // CONFERENCE-level standings only (32 teams split AFC/NFC) — verified
 // live against actual results (e.g. Seattle showed 1-0/Rams 0-1
 // immediately after their Week 1 final, while teams that hadn't
@@ -97,35 +143,82 @@ function espnTeamName(team){
 // abbreviation, logoUrl, wins, losses, ties, streak, pointsFor,
 // pointsAgainst, winPercent }]
 export async function fetchEspnNflStandings(){
-  const data = await fetchEspnJSON('/apis/v2/sports/football/nfl/standings');
-  if(!data || !Array.isArray(data.children)) return null;
+  const rows = await fetchEspnFlatStandings('/apis/v2/sports/football/nfl/standings');
+  if(!rows) return null;
+  return rows.map(r => ({
+    id: r.id, conference: r.conference, conferenceAbbr: r.conferenceAbbr,
+    teamName: r.teamName, teamNickname: r.teamNickname, abbreviation: r.abbreviation, logoUrl: r.logoUrl,
+    wins: r.stats.wins, losses: r.stats.losses, ties: r.stats.ties,
+    streak: r.stats.streak, pointsFor: r.stats.pointsFor, pointsAgainst: r.stats.pointsAgainst,
+    winPercent: r.stats.winPercent
+  }));
+}
 
-  const rows = [];
-  data.children.forEach(conf => {
-    const entries = (conf.standings && conf.standings.entries) || [];
-    entries.forEach(entry => {
-      const stat = name => {
-        const s = (entry.stats || []).find(x => x.name === name);
-        return s ? s.value : null;
-      };
-      rows.push({
-        id: entry.team.id,
-        conference: conf.name,
-        conferenceAbbr: conf.abbreviation,
-        teamName: espnTeamName(entry.team),
-        abbreviation: entry.team.abbreviation,
-        logoUrl: espnLogoUrl(entry.team),
-        wins: stat('wins'),
-        losses: stat('losses'),
-        ties: stat('ties'),
-        streak: stat('streak'),
-        pointsFor: stat('pointsFor'),
-        pointsAgainst: stat('pointsAgainst'),
-        winPercent: stat('winPercent')
-      });
-    });
-  });
-  return rows;
+// NBA/WNBA conference standings — verified live (2026-09-11). Same
+// win%/games-behind display convention as MLB below, but by conference
+// (East/West) rather than league (AL/NL), and no ties (basketball has
+// none). playoffSeed is carried in `stats` if a future view wants a
+// seed number instead of/alongside rank-by-percentage.
+// Shape returned: [{ id, conference, conferenceAbbr, teamName,
+// abbreviation, logoUrl, wins, losses, streak, winPercent, gamesBehind,
+// pointsFor, pointsAgainst }]
+function mapNbaLikeRow(r){
+  return {
+    id: r.id, conference: r.conference, conferenceAbbr: r.conferenceAbbr,
+    teamName: r.teamName, teamNickname: r.teamNickname, abbreviation: r.abbreviation, logoUrl: r.logoUrl,
+    wins: r.stats.wins, losses: r.stats.losses, streak: r.stats.streak,
+    winPercent: r.stats.winPercent, gamesBehind: r.stats.gamesBehind,
+    pointsFor: r.stats.pointsFor, pointsAgainst: r.stats.pointsAgainst
+  };
+}
+
+export async function fetchEspnNbaStandings(){
+  const rows = await fetchEspnFlatStandings('/apis/v2/sports/basketball/nba/standings');
+  return rows ? rows.map(mapNbaLikeRow) : null;
+}
+
+export async function fetchEspnWnbaStandings(){
+  const rows = await fetchEspnFlatStandings('/apis/v2/sports/basketball/wnba/standings');
+  return rows ? rows.map(mapNbaLikeRow) : null;
+}
+
+// NHL conference standings — verified live (2026-09-11). Hockey's
+// standings are ranked by points (2 per win, 1 per OT/shootout loss),
+// not win%, and carry an otLosses field with no equivalent in the other
+// sports here — regulation losses get zero points, an OT/shootout loss
+// still gets one, so `points` (not wins/losses alone) is what actually
+// orders the table.
+// Shape returned: [{ id, conference, conferenceAbbr, teamName,
+// abbreviation, logoUrl, wins, losses, otLosses, points, streak }]
+export async function fetchEspnNhlStandings(){
+  const rows = await fetchEspnFlatStandings('/apis/v2/sports/hockey/nhl/standings');
+  if(!rows) return null;
+  return rows.map(r => ({
+    id: r.id, conference: r.conference, conferenceAbbr: r.conferenceAbbr,
+    teamName: r.teamName, teamNickname: r.teamNickname, abbreviation: r.abbreviation, logoUrl: r.logoUrl,
+    wins: r.stats.wins, losses: r.stats.losses, otLosses: r.stats.otLosses,
+    points: r.stats.points, streak: r.stats.streak
+  }));
+}
+
+// MLB league standings (AL/NL, not "conference" — ESPN's own group
+// name/abbreviation are used as-is either way) — verified live
+// (2026-09-11). Baseball's win% + games-behind is the real ordering
+// convention (not points like NHL); ties are vanishingly rare but the
+// field exists on the endpoint, so it's carried through rather than
+// assumed zero.
+// Shape returned: [{ id, conference, conferenceAbbr, teamName,
+// abbreviation, logoUrl, wins, losses, ties, winPercent, gamesBehind,
+// streak }]
+export async function fetchEspnMlbStandings(){
+  const rows = await fetchEspnFlatStandings('/apis/v2/sports/baseball/mlb/standings');
+  if(!rows) return null;
+  return rows.map(r => ({
+    id: r.id, conference: r.conference, conferenceAbbr: r.conferenceAbbr,
+    teamName: r.teamName, teamNickname: r.teamNickname, abbreviation: r.abbreviation, logoUrl: r.logoUrl,
+    wins: r.stats.wins, losses: r.stats.losses, ties: r.stats.ties,
+    winPercent: r.stats.winPercent, gamesBehind: r.stats.gamesBehind, streak: r.stats.streak
+  }));
 }
 
 // Static, stable structural data — confirmed live (2026-09-11) by
@@ -188,6 +281,7 @@ export async function fetchEspnNflDivisionStandings(){
         return {
           teamId,
           teamName: known ? known.teamName : null,
+          teamNickname: known ? known.teamNickname : null,
           abbreviation: known ? known.abbreviation : null,
           logoUrl: known ? known.logoUrl : null,
           wins: stat('wins'),
@@ -235,6 +329,54 @@ export async function fetchEspnCfbRankings(pollName = 'AP Top 25'){
     points: r.points,
     firstPlaceVotes: r.firstPlaceVotes
   }));
+}
+
+// Every FBS team's real win-loss record, across all 11 conferences —
+// verified live (2026-09-12): 124 FBS teams. This is what used to need
+// TheRundown's /teams/{sportId} (js/standings-cfb.js's cfbRecordsCache):
+// board card record, the team modal stat strip, and the "Person"
+// combined-win% view. One real gap this doesn't cover — FBS only, no
+// FCS — matters for exactly one of this app's drafted CFB teams (NDSU);
+// see findCfbRecord in js/standings-cfb.js for the ESPN-first,
+// TheRundown-fallback-for-anything-ESPN-doesn't-have approach that
+// covers it without keeping the other 29 CFB teams on TheRundown too.
+// No conference grouping needed here (unlike fetchEspnFlatStandings's
+// NFL/NBA/etc use) — CFB's own "League" view is the AP Top 25
+// (fetchEspnCfbRankings above), not a conference standings table, so
+// this flattens every conference straight into one array.
+// Matches by `location` (e.g. "Ohio State"), the same field
+// fetchEspnCfbRankings already uses — reuses that exact matching
+// approach (findCfbTeamKeyByEspnLocation) rather than a second one.
+// Shape returned: [{ id, location, teamName, wins, losses }]
+export async function fetchEspnCfbFullStandings(){
+  const data = await fetchEspnJSON('/apis/v2/sports/football/college-football/standings');
+  if(!data || !Array.isArray(data.children)) return null;
+
+  const rows = [];
+  data.children.forEach(conf => {
+    const entries = (conf.standings && conf.standings.entries) || [];
+    entries.forEach(entry => {
+      // Unlike NFL/NBA/NHL/MLB, CFB's stats array has no flat "losses"
+      // field at all — confirmed live (2026-09-12), Oregon's array has
+      // wins=1 but nothing named "losses". What it does have is several
+      // named per-split records (home/division/vs-AP-ranked/etc, each
+      // with its own `summary` like "1-0"), one of which is `overall` —
+      // that's the real season record, parsed the same "W-L" string way
+      // parseWinLossRecord (js/standings-cfb.js) already parses
+      // TheRundown's identically-shaped record string.
+      const overall = (entry.stats || []).find(s => s.name === 'overall');
+      const m = overall && /^(\d+)-(\d+)/.exec(overall.summary || '');
+      if(!m) return;
+      rows.push({
+        id: entry.team.id,
+        location: entry.team.location,
+        teamName: espnTeamName(entry.team),
+        wins: parseInt(m[1], 10),
+        losses: parseInt(m[2], 10)
+      });
+    });
+  });
+  return rows;
 }
 
 // Real EPL table, all 20 clubs — verified live (2026-09-11): carries
@@ -297,7 +439,22 @@ export async function fetchEspnEplStandings(){
 // [{ id, date, completed, statusDetail, isHome, opponentName,
 // opponentLogoUrl, ownScore, oppScore, venueName, broadcast }],
 // recent newest-first, upcoming soonest-first.
-export async function fetchEspnEplTeamSchedule(espnTeamId){
+// Generalized for every league that uses this same "site" API team-
+// schedule shape (soccer/eng.1 for EPL, basketball/nba, hockey/nhl,
+// baseball/mlb, basketball/wnba so far) — the ?fixture=true flag's
+// actual behavior turned out to differ by sport, checked live
+// (2026-09-12): for EPL it genuinely splits (default = played matches
+// only, ?fixture=true = remaining fixtures only), but for MLB both
+// calls return the SAME full ~165-game season either way. Rather than
+// trust that split, this fetches both, merges by event id (harmless
+// duplicate work for MLB, necessary for EPL), and does the real
+// recent/upcoming split itself off each event's own `completed` flag —
+// correct regardless of which behavior a given sport turns out to have.
+// Shape returned: { recent, upcoming }, each an array of
+// [{ id, date, completed, statusDetail, isHome, opponentName,
+// opponentLogoUrl, ownScore, oppScore, venueName, broadcast }],
+// recent newest-first, upcoming soonest-first.
+export async function fetchEspnTeamSchedule(sportLeaguePath, espnTeamId){
   const normalize = event => {
     const comp = event.competitions && event.competitions[0];
     const competitors = (comp && comp.competitors) || [];
@@ -321,13 +478,88 @@ export async function fetchEspnEplTeamSchedule(espnTeamId){
     };
   };
 
-  const [recentData, upcomingData] = await Promise.all([
-    fetchEspnJSON(`/apis/site/v2/sports/soccer/eng.1/teams/${espnTeamId}/schedule`),
-    fetchEspnJSON(`/apis/site/v2/sports/soccer/eng.1/teams/${espnTeamId}/schedule?fixture=true`)
+  const [a, b] = await Promise.all([
+    fetchEspnJSON(`/apis/site/v2/sports/${sportLeaguePath}/teams/${espnTeamId}/schedule`),
+    fetchEspnJSON(`/apis/site/v2/sports/${sportLeaguePath}/teams/${espnTeamId}/schedule?fixture=true`)
   ]);
-  const recent = ((recentData && recentData.events) || []).map(normalize).filter(Boolean);
-  const upcoming = ((upcomingData && upcomingData.events) || []).map(normalize).filter(Boolean);
-  recent.sort((a, b) => new Date(b.date) - new Date(a.date));
-  upcoming.sort((a, b) => new Date(a.date) - new Date(b.date));
+  const byId = new Map();
+  [...((a && a.events) || []), ...((b && b.events) || [])].forEach(event => {
+    const normalized = normalize(event);
+    if(normalized) byId.set(normalized.id, normalized);
+  });
+  const all = [...byId.values()];
+  const now = Date.now();
+  const recent = all.filter(e => e.completed).sort((x, y) => new Date(y.date) - new Date(x.date));
+  // A postponed game (real, confirmed live on the Cubs' schedule —
+  // several April/June 2026 games marked STATUS_POSTPONED) is
+  // "incomplete" forever but dated months in the past — without this
+  // date guard it would sort to the front of "upcoming" ahead of every
+  // real future game. Live-in-progress games never reach this: those
+  // are handled earlier by TheRundown's overlay (isRundownEventLive),
+  // so excluding a past date here never hides a game actually in
+  // progress right now.
+  const upcoming = all.filter(e => !e.completed && new Date(e.date).getTime() >= now)
+    .sort((x, y) => new Date(x.date) - new Date(y.date));
   return { recent, upcoming };
+}
+
+// Today's full slate for a league (one request covers every team in
+// it, same "one shared fetch" idea as rundownDayCache in js/api.js) —
+// this is what replaces TheRundown for live in-game state. Verified
+// live (2026-09-12) against 4 actually-in-progress MLB games: a
+// STATUS_IN_PROGRESS competition's `status.type.state` is `'in'`
+// (`'pre'`/`'post'` otherwise), and each competitor already carries a
+// live `score` — no separate polling endpoint needed, this one
+// response has today's state for every game at once.
+// Shape returned: [{ id, state, detail, completed, competitors:
+// [{ teamId, teamName, homeAway, score }] }]
+export async function fetchEspnScoreboard(sportLeaguePath){
+  const data = await fetchEspnJSON(`/apis/site/v2/sports/${sportLeaguePath}/scoreboard`);
+  if(!data || !Array.isArray(data.events)) return null;
+
+  return data.events.map(event => {
+    const comp = event.competitions && event.competitions[0];
+    if(!comp) return null;
+    const statusType = comp.status && comp.status.type;
+    const competitors = (comp.competitors || []).map(c => ({
+      teamId: c.team && c.team.id,
+      teamName: espnTeamName(c.team),
+      homeAway: c.homeAway,
+      score: (c.score !== undefined && c.score !== null) ? Number(c.score) : null
+    }));
+    return {
+      id: event.id,
+      state: statusType ? statusType.state : null,
+      detail: statusType ? statusType.shortDetail : null,
+      completed: !!(statusType && statusType.completed),
+      competitors
+    };
+  }).filter(Boolean);
+}
+
+// Given today's scoreboard (fetchEspnScoreboard above) and one team's
+// ESPN id, the same {isHome, own, opp, opponentName, period} shape
+// rundownEventLine (js/api.js) builds from TheRundown — so
+// renderStats/renderForm/renderNext/renderRowStatus (js/live-data.js)
+// can read either source through one interface. `isLive` is state==='in'
+// specifically, not just "found an event" — a scheduled-later-today or
+// already-final game still returns a line (its score/detail), just
+// with isLive:false, so callers can still show "Final 7-2" from the
+// same lookup instead of needing a separate completed-game code path.
+export function findEspnScoreboardLine(events, espnTeamId){
+  if(!events) return null;
+  const event = events.find(e => e.competitors.some(c => String(c.teamId) === String(espnTeamId)));
+  if(!event) return null;
+  const self = event.competitors.find(c => String(c.teamId) === String(espnTeamId));
+  const opponent = event.competitors.find(c => String(c.teamId) !== String(espnTeamId));
+  if(!self || !opponent) return null;
+  return {
+    isLive: event.state === 'in',
+    completed: event.completed,
+    isHome: self.homeAway === 'home',
+    own: self.score,
+    opp: opponent.score,
+    opponentName: opponent.teamName,
+    period: event.detail
+  };
 }
