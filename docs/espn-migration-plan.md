@@ -1,9 +1,10 @@
 # ESPN hidden API — evaluation & migration plan
 
-**Status: Phases 1-3 and the EPL phase below are live. Phases 4-5 not started.**
-**Code:** [`js/espn.js`](../js/espn.js), wired into [`js/standings-nfl.js`](../js/standings-nfl.js),
-[`js/standings-cfb.js`](../js/standings-cfb.js) (rankings only), and
-[`js/standings-epl.js`](../js/standings-epl.js).
+**Status: everything below is live except College Basketball (see "Second migration wave," phase E) —
+every league now reads ESPN for standings/rankings, schedule, and live in-game state except CBB
+(no ESPN integration built yet) and CFB's one FCS team, NDSU (a narrow TheRundown fallback).**
+**Code:** [`js/espn.js`](../js/espn.js) and [`js/standings-flat.js`](../js/standings-flat.js), wired
+into every league's own `js/standings-*.js` file and `js/live-data.js`.
 
 ## Why this file exists
 
@@ -239,7 +240,7 @@ immediately — EPL's schedule (Most Recent Result / Next Match) moved off TheSp
 `schedule-previous`/`schedule-next` onto ESPN's `teams/{id}/schedule` (default call = played matches
 this season, `?fixture=true` = every remaining fixture), and the standings' zone field got wired into
 the team card as a colored tag. Same call count per team as before (2 schedule calls), but each now
-carries a real venue name and TV broadcast that TheSportsDB never had — see `fetchEspnEplTeamSchedule`
+carries a real venue name and TV broadcast that TheSportsDB never had — see `fetchEspnTeamSchedule`
 in `js/espn.js` and `renderForm`/`renderNext`/`renderRowStatus` in `js/live-data.js`. Added a "Form"
 strip (last 5 results as pills) computed client-side from the same schedule response — no extra
 request. This club's ESPN team id is resolved the same way `findEspnEplRow` already does for the stat
@@ -251,11 +252,11 @@ decision, not a technical one, and shelved for now.
 
 ## What stays on TheRundown
 
-Live in-game state (`fetchRundownEventForTeam`, `isRundownEventLive` in `js/api.js`) is unaffected by
-this plan — it's a different problem (real-time score/clock while a game is in progress) that wasn't
-evaluated here. ESPN's scoreboard endpoint likely covers this too (it already showed
-`STATUS_FINAL`/live status fields during this pilot), but that's its own follow-up, not bundled into
-the standings/rankings migration above.
+**Superseded — see "Second migration wave" below.** Live in-game state moved off TheRundown too, onto
+ESPN's scoreboard endpoint, for every league that has an ESPN standings-based team-id mapping (EPL,
+NFL, CFB, NBA, NHL, MLB, WNBA). TheRundown's only remaining callers are College Basketball (no ESPN
+integration built for it yet — see that section) and CFB's one FCS team, NDSU, as a per-team fallback
+where ESPN's FBS-only data has no row.
 
 ## If this holds up: what Phase 2+ removes
 
@@ -269,3 +270,79 @@ League Facts KV store (job #2 in its own header comment), the one-off TheSportsD
 V2 team/schedule proxy, and whatever's left of the TheRundown live-state proxy — worth revisiting that
 file's own header comment once this migration is further along, since large chunks of "why this worker
 exists" will no longer apply.
+
+## Second migration wave (2026-09-12): remaining leagues + live state off TheRundown
+
+A full review of every remaining SportsDB/TheRundown call site (requested after the EPL phase above
+landed) turned into five more phases, executed in one session and merged together. Reviewed in order:
+
+**A — NBA/NHL/MLB/WNBA standings.** These 4 leagues had *no* standings source at all before this —
+TheSportsDB's free tier never carried real standings for them, so the Standings tab just said "No data
+available." `apis/v2/sports/{sport}/{league}/standings` (same flat, conference-grouped shape NFL
+already used) works identically for all 4 — verified live. Pure upside, zero regression risk, so this
+shipped first. Rather than duplicate NFL's ~30-line fetcher four more times, `fetchEspnFlatStandings`
+in `js/espn.js` factors out the shared "walk `children[].standings.entries[]`" logic (NFL's own
+fetcher was refactored onto it too), and `js/standings-flat.js` factors out the shared cache/toggle/
+render engine every one of these 4 leagues' `js/standings-nba.js`/`-nhl.js`/`-mlb.js`/`-wnba.js` files
+build on top of — each of those is now a thin, sport-specific config (record formatting, sort order,
+how the "Person" combined record is built) rather than a second copy of NFL's whole file.
+
+Matching an ESPN row back to a drafted team turned out to need an **exact** match (after
+`normalizeTeamName`), not EPL/CFB's looser substring rule (`findDraftedTeamByName` in `js/utils.js`) —
+tried the substring rule first here and it produced a real false positive: "Nets" is a literal
+substring of "Hornets", so Charlotte Hornets matched to the Brooklyn Nets on the standings table. Fixed
+by adding `findFlatTeamKey` (exact-match only) in `js/standings-flat.js`, plus two aliases in
+`TEAM_NAME_ALIASES` (`js/utils.js`) for the only two of 120 drafted teams that don't match ESPN's plain
+nickname (`team.name`) exactly: "Mavs" vs "Mavericks", "Blazers" vs "Trail Blazers". Also caught: ESPN
+rows had to expose that nickname as a separate `teamNickname` field alongside the full `teamName`
+("Cleveland Cavaliers") used for display — matching against the full name would need substring logic
+again, reintroducing the same bug.
+
+**B — NBA/NHL/MLB/WNBA schedule.** Same `fetchEspnTeamSchedule` EPL already used (see below), just
+pointed at each league's own sport/league slug. One real cross-sport gap found while building this:
+the `?fixture=true` flag's behavior isn't consistent — for soccer it genuinely splits (default =
+played only, `?fixture=true` = remaining only), but for MLB *both* calls return the full ~165-game
+season regardless. Fixed by not trusting the flag at all: `fetchEspnTeamSchedule` now merges both
+responses by event id and does the real recent/upcoming split itself off each event's own `completed`
+flag. A second bug surfaced by this: the Cubs' real schedule has three `STATUS_POSTPONED` games
+(April, June) that are permanently "incomplete" but dated months in the past — without a date guard
+those sorted to the front of "upcoming," so `fetchEspnTeamSchedule` now also requires an upcoming
+event's date to be `>= now`.
+
+**C — CFB records off TheRundown.** The AP Top 25 moved to ESPN back in Phase 2 above; the full-roster
+win-loss record (board card, team modal, "Person" view) was still TheRundown's `/teams/{sportId}`.
+ESPN's own `college-football/standings` covers this — but only for the 124 FBS teams across 11
+conferences, not FCS. This app has exactly one drafted FCS team (NDSU), so `findCfbRecord` in
+`js/standings-cfb.js` tries ESPN first and falls back to the existing TheRundown cache only when ESPN
+has no row — the other 29 of 30 drafted CFB teams never touch TheRundown for this anymore. One data
+shape surprise: unlike NFL/NBA/NHL/MLB, CFB's stats array has no flat `losses` field at all (confirmed
+live) — only several named per-split records (home, division, vs-AP-ranked, etc.), one of which
+(`overall`) carries a `summary` string like `"1-0"`. `fetchEspnCfbFullStandings` parses that the same
+way `parseWinLossRecord` already parses TheRundown's identically-shaped record string.
+
+**D — NFL/CFB schedule off SportsDB V2.** Folded into the same `FLAT_SCHEDULE_LEAGUES` map in
+`js/live-data.js` that EPL/NBA/NHL/MLB/WNBA already used, rather than a separate code path — the only
+wrinkle was making sure NDSU (no ESPN row, from phase C) falls through to the *existing* generic
+TheSportsDB branch instead of ending up with no schedule at all: `fetchTeamBundle`'s ESPN-schedule
+branch only commits (and `return`s) once `findRow(meta)` actually resolves a row; otherwise it falls
+through to the code below exactly as it did before this phase existed.
+
+**E — Live in-game state, all leagues, off TheRundown.** The last TheRundown dependency for every
+league except College Basketball. `fetchEspnScoreboard(sportPath)` (`js/espn.js`) is one request per
+league covering every team's current game at once (mirrors `rundownDayCache`'s "one shared fetch, not
+one per team" shape in `js/api.js`) — `competitions[0].status.type.state` is `'in'` for a game actually
+in progress, `'pre'`/`'post'` otherwise, and each competitor already carries a live `score`, so no
+second polling endpoint is needed. `findEspnScoreboardLine` normalizes that into the same
+`{isHome, own, opp, opponentName, period}` shape `rundownEventLine` already built from TheRundown, so
+`renderStats`/`renderForm`/`renderNext`/`renderRowStatus` in `js/live-data.js` just gained a
+`bundle.espnLive` check ahead of their existing `bundle.rundownEvent` one, rather than a parallel
+rewrite. Verified against a real live window (2026-09-12, four MLB games actually in progress) rather
+than just structurally: San Diego at San Francisco correctly showed `LIVE 7-5 · Bot 5th` on both the
+board pill and the team modal, live, mid-game.
+
+**What this leaves on TheRundown:** College Basketball (no ESPN integration built for it at all yet —
+it has no standings/schedule source today either, TheSportsDB never carried it; giving it the same
+treatment as the other 7 leagues is a real follow-up but a bigger lift, since there's no existing
+schedule/standings scaffolding to extend the way there was here) and CFB's one FCS team, NDSU (phase
+C's fallback). Every other league's per-team live/schedule/record fetch no longer touches TheRundown's
+shared daily quota at all.

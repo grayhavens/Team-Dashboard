@@ -84,7 +84,18 @@ const TEAM_NAME_ALIASES = {
   'man utd': 'manchester united',
   'man united': 'manchester united',
   'spurs': 'tottenham hotspur',
-  'afc bournemouth': 'bournemouth'
+  'afc bournemouth': 'bournemouth',
+  // NBA: this app's short "Blazers" vs ESPN's real nickname "Trail
+  // Blazers" — confirmed live (2026-09-12) against all 120 NBA/NHL/
+  // MLB/WNBA drafted teams, the only mismatch left after switching
+  // that matcher to exact-match (see findFlatTeamKey in
+  // js/standings-flat.js) instead of findDraftedTeamByName's substring
+  // rule, which turned out to have a real false-positive here: "Nets"
+  // is a literal substring of "Hornets", so Charlotte Hornets was
+  // matching to the Nets. (Dallas' "Mavs" was the other mismatch, since
+  // fixed by using ESPN's own full nickname, "Mavericks", as this app's
+  // own name instead of aliasing around it.)
+  'blazers': 'trail blazers'
 };
 
 export function normalizeTeamName(name){

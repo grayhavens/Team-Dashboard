@@ -16,10 +16,11 @@ import {
   renderAllEplCardRecords
 } from './standings-epl.js';
 import {
-  cfbRecordsCache, cfbStandingsMode, computeCfbDrafterCombined, renderCfbByDrafterRow,
+  cfbStandingsMode, computeCfbDrafterCombined, renderCfbByDrafterRow,
   computeCfbRankingTable, renderCfbRankingRow, cfbStandingsToggleHtml, fetchCfbRecords,
   loadCfbRecordsCache, renderAllCfbCardRecords,
-  espnCfbRankingsCache, fetchEspnCfbRankingsCached, loadEspnCfbRankingsCache
+  espnCfbRankingsCache, fetchEspnCfbRankingsCached, loadEspnCfbRankingsCache,
+  espnCfbRecordsCache, fetchEspnCfbRecordsCached, loadEspnCfbRecordsCache
 } from './standings-cfb.js';
 import {
   nflStandingsMode, nflConferenceSubMode, computeNflDrafterCombined, renderNflByDrafterRow,
@@ -27,6 +28,26 @@ import {
   nflStandingsToggleHtml, renderAllNflCardRecords, espnNflStandingsCache, fetchEspnNflStandingsCached,
   loadEspnNflStandingsCache, espnNflDivisionCache, fetchEspnNflDivisionStandingsCached, loadEspnNflDivisionCache
 } from './standings-nfl.js';
+import {
+  espnNbaStandingsCache, loadEspnNbaStandingsCache, fetchEspnNbaStandingsCached, renderAllNbaCardRecords,
+  computeNbaConferenceStandings, renderNbaStandingsRow, computeNbaDrafterCombined, renderNbaByDrafterRow,
+  nbaStandingsToggleHtml, getNbaStandingsMode, nbaConferences
+} from './standings-nba.js';
+import {
+  espnNhlStandingsCache, loadEspnNhlStandingsCache, fetchEspnNhlStandingsCached, renderAllNhlCardRecords,
+  computeNhlConferenceStandings, renderNhlStandingsRow, computeNhlDrafterCombined, renderNhlByDrafterRow,
+  nhlStandingsToggleHtml, getNhlStandingsMode, nhlConferences
+} from './standings-nhl.js';
+import {
+  espnMlbStandingsCache, loadEspnMlbStandingsCache, fetchEspnMlbStandingsCached, renderAllMlbCardRecords,
+  computeMlbConferenceStandings, renderMlbStandingsRow, computeMlbDrafterCombined, renderMlbByDrafterRow,
+  mlbStandingsToggleHtml, getMlbStandingsMode, mlbConferences
+} from './standings-mlb.js';
+import {
+  espnWnbaStandingsCache, loadEspnWnbaStandingsCache, fetchEspnWnbaStandingsCached, renderAllWnbaCardRecords,
+  computeWnbaConferenceStandings, renderWnbaStandingsRow, computeWnbaDrafterCombined, renderWnbaByDrafterRow,
+  wnbaStandingsToggleHtml, getWnbaStandingsMode, wnbaConferences
+} from './standings-wnba.js';
 import { renderOverallStandings, setObMode } from './overall.js';
 import { loadLiveDataCache, loadTeamInfoCache, renderRowStatus, backgroundRefreshTick, REFRESH_STEP_MS, liveDataCache } from './live-data.js';
 
@@ -122,15 +143,21 @@ export function renderBoard(){
       const meta = TEAM_META[teamKey];
       const cfbRecordHtml = league.key === 'cfb' ? `<span class="cfb-record" id="cfb-record-${teamKey}"></span>` : '';
       const nflRecordHtml = league.key === 'nfl' ? `<span class="cfb-record" id="nfl-record-${teamKey}"></span>` : '';
+      const nbaRecordHtml = league.key === 'nba' ? `<span class="cfb-record" id="nba-record-${teamKey}"></span>` : '';
+      const nhlRecordHtml = league.key === 'nhl' ? `<span class="cfb-record" id="nhl-record-${teamKey}"></span>` : '';
+      const mlbRecordHtml = league.key === 'mlb' ? `<span class="cfb-record" id="mlb-record-${teamKey}"></span>` : '';
+      const wnbaRecordHtml = league.key === 'wnba' ? `<span class="cfb-record" id="wnba-record-${teamKey}"></span>` : '';
       // EPL: every team is in the same one league, so the static
       // "Premier League" boardSub text carried no information — swap
       // it for the team's own record + table position instead (see
       // eplRecordLabel/renderEplCardRecord in js/standings-epl.js).
-      // CFB/NFL boardSub (mascot/city) is still meaningful per team, so
-      // those keep it and just append their record chip after it.
+      // Every other league's boardSub (mascot/city) is still meaningful
+      // per team, so those keep it and just append their record chip
+      // after it (empty string until that league's standings cache
+      // resolves, same as CFB/NFL always have).
       const subHtml = league.key === 'epl'
         ? `<span class="epl-record" id="epl-record-${teamKey}"></span>`
-        : `${meta.boardSub}${cfbRecordHtml}${nflRecordHtml}`;
+        : `${meta.boardSub}${cfbRecordHtml}${nflRecordHtml}${nbaRecordHtml}${nhlRecordHtml}${mlbRecordHtml}${wnbaRecordHtml}`;
       return `
         <div class="team clickable" onclick="openTeamModal('${teamKey}')">
           ${teamBadgeHtml(meta)}
@@ -171,6 +198,10 @@ export function renderBoard(){
   renderAllCfbCardRecords();
   renderAllEplCardRecords();
   renderAllNflCardRecords();
+  renderAllNbaCardRecords();
+  renderAllNhlCardRecords();
+  renderAllMlbCardRecords();
+  renderAllWnbaCardRecords();
 }
 
 export function scrollToLeague(key){
@@ -272,6 +303,43 @@ function leagueBlockHtml(league, bodyHtml){
   `;
 }
 
+// Shared render body for the 4 "flat" ESPN-standings leagues (NBA/NHL/
+// MLB/WNBA) — conference/league toggle + Person, no division sub-toggle
+// (unlike NFL, none of these have division grouping wired up yet). Each
+// api bundle is just that league's own exports from js/standings-flat.js
+// (see js/standings-nba.js etc.) — this only knows the shape they all
+// share, not any sport-specific detail.
+function renderFlatLeagueBlock(league, api){
+  const mode = api.getMode();
+  let bodyHtml;
+  if(mode === 'byDrafter'){
+    if(api.cache.rows){
+      const rowsHtml = api.computeDrafterCombined().map((row, i) => api.renderByDrafterRow(row, i + 1)).join('');
+      bodyHtml = api.toggleHtml() + rowsHtml;
+      api.fetchCached(); // no-op if already fresh; quietly refreshes in the background if stale
+    } else if(api.cache.error){
+      bodyHtml = `<div class="no-live-note">No data available.</div>`;
+    } else {
+      api.fetchCached();
+      bodyHtml = `<div class="loading-note">Loading standings…</div>`;
+    }
+  } else if(api.cache.rows){
+    const confAbbr = api.conferences.find(c => c.mode === mode).abbr;
+    const teams = api.computeConferenceStandings(confAbbr);
+    const rowsHtml = teams.length
+      ? teams.map((t, i) => api.renderStandingsRow(t, i + 1)).join('')
+      : `<div class="no-live-note">No teams currently reporting.</div>`;
+    bodyHtml = api.toggleHtml() + rowsHtml;
+    api.fetchCached();
+  } else if(api.cache.error){
+    bodyHtml = `<div class="no-live-note">No data available.</div>`;
+  } else {
+    api.fetchCached();
+    bodyHtml = `<div class="loading-note">Loading standings…</div>`;
+  }
+  return leagueBlockHtml(league, bodyHtml);
+}
+
 // Which league the Standings view is isolated to — like eplStandingsMode
 // in js/standings-epl.js, this isn't persisted to localStorage, so it
 // resets to "All" each time you open the app with no URL state of its
@@ -317,20 +385,24 @@ export function renderStandings(){
     }
 
     if(league.key === 'cfb'){
-      // Each mode now has its own data source — the AP Top 25 moved to
-      // ESPN (no more TheRundown dependency, see js/standings-cfb.js's
-      // header comment), while "Person" (combined win%) still reads
-      // TheRundown's records — so each is gated on its own cache rather
-      // than the one shared check this used before.
+      // Each mode has its own ESPN cache — the AP Top 25 (rankings) and
+      // "Person" (full-roster records) are two different ESPN endpoints
+      // (js/standings-cfb.js's header comment), so each is gated on its
+      // own cache rather than one shared check. fetchCfbRecords (the
+      // TheRundown fallback for CFB's one FCS team, NDSU) rides along
+      // with the ESPN fetch rather than gating readiness itself, since
+      // ESPN alone already covers 29 of 30 drafted teams.
       let bodyHtml;
       if(cfbStandingsMode === 'byDrafter'){
-        if(cfbRecordsCache.byTeamId){
+        if(espnCfbRecordsCache.rows){
           const rowsHtml = computeCfbDrafterCombined().map((row, i) => renderCfbByDrafterRow(row, i + 1)).join('');
           bodyHtml = cfbStandingsToggleHtml() + rowsHtml;
-          fetchCfbRecords(); // no-op if already fresh; quietly refreshes in the background if stale
-        } else if(cfbRecordsCache.error){
+          fetchEspnCfbRecordsCached(); // no-op if already fresh; quietly refreshes in the background if stale
+          fetchCfbRecords();
+        } else if(espnCfbRecordsCache.error){
           bodyHtml = `<div class="no-live-note">No data available.</div>`;
         } else {
+          fetchEspnCfbRecordsCached();
           fetchCfbRecords();
           bodyHtml = `<div class="loading-note">Loading standings…</div>`;
         }
@@ -404,6 +476,31 @@ export function renderStandings(){
       return leagueBlockHtml(league, bodyHtml);
     }
 
+    if(league.key === 'nba') return renderFlatLeagueBlock(league, {
+      cache: espnNbaStandingsCache, fetchCached: fetchEspnNbaStandingsCached, getMode: getNbaStandingsMode,
+      conferences: nbaConferences, computeConferenceStandings: computeNbaConferenceStandings,
+      renderStandingsRow: renderNbaStandingsRow, computeDrafterCombined: computeNbaDrafterCombined,
+      renderByDrafterRow: renderNbaByDrafterRow, toggleHtml: nbaStandingsToggleHtml
+    });
+    if(league.key === 'nhl') return renderFlatLeagueBlock(league, {
+      cache: espnNhlStandingsCache, fetchCached: fetchEspnNhlStandingsCached, getMode: getNhlStandingsMode,
+      conferences: nhlConferences, computeConferenceStandings: computeNhlConferenceStandings,
+      renderStandingsRow: renderNhlStandingsRow, computeDrafterCombined: computeNhlDrafterCombined,
+      renderByDrafterRow: renderNhlByDrafterRow, toggleHtml: nhlStandingsToggleHtml
+    });
+    if(league.key === 'mlb') return renderFlatLeagueBlock(league, {
+      cache: espnMlbStandingsCache, fetchCached: fetchEspnMlbStandingsCached, getMode: getMlbStandingsMode,
+      conferences: mlbConferences, computeConferenceStandings: computeMlbConferenceStandings,
+      renderStandingsRow: renderMlbStandingsRow, computeDrafterCombined: computeMlbDrafterCombined,
+      renderByDrafterRow: renderMlbByDrafterRow, toggleHtml: mlbStandingsToggleHtml
+    });
+    if(league.key === 'wnba') return renderFlatLeagueBlock(league, {
+      cache: espnWnbaStandingsCache, fetchCached: fetchEspnWnbaStandingsCached, getMode: getWnbaStandingsMode,
+      conferences: wnbaConferences, computeConferenceStandings: computeWnbaConferenceStandings,
+      renderStandingsRow: renderWnbaStandingsRow, computeDrafterCombined: computeWnbaDrafterCombined,
+      renderByDrafterRow: renderWnbaByDrafterRow, toggleHtml: wnbaStandingsToggleHtml
+    });
+
     return leagueBlockHtml(league, `<div class="no-live-note">No data available.</div>`);
   }).join('');
 
@@ -434,8 +531,13 @@ loadLiveDataCache();
 loadEplStandingsCache();
 loadCfbRecordsCache();
 loadEspnCfbRankingsCache();
+loadEspnCfbRecordsCache();
 loadEspnNflStandingsCache();
 loadEspnNflDivisionCache();
+loadEspnNbaStandingsCache();
+loadEspnNhlStandingsCache();
+loadEspnMlbStandingsCache();
+loadEspnWnbaStandingsCache();
 loadTeamInfoCache();
 renderBoard();
 applyUrlState();
@@ -448,8 +550,13 @@ applyUrlState();
 // other place that calls these) has been opened yet, so the board's
 // records aren't stuck waiting on that.
 fetchCfbRecords();
+fetchEspnCfbRecordsCached();
 fetchEplStandingsTable();
 fetchEspnNflStandingsCached();
+fetchEspnNbaStandingsCached();
+fetchEspnNhlStandingsCached();
+fetchEspnMlbStandingsCached();
+fetchEspnWnbaStandingsCached();
 
 backgroundRefreshTick();
 setInterval(backgroundRefreshTick, REFRESH_STEP_MS);

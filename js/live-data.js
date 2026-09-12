@@ -7,10 +7,51 @@ import { TEAM_META } from './data.js';
 import { fetchJSON, ordinal, formatKickoff, formatUpdatedAt, teamBadgeHtml, lockBodyScroll, unlockBodyScroll } from './utils.js';
 import { API_BASE, fetchRundownEventForTeam, isRundownEventLive, V2_MIGRATED_LEAGUES, UPCOMING_CHIP_LEAGUES, fetchSportsDbV2Team, fetchSportsDbV2Schedule } from './api.js';
 import { fetchEplStandingsTable, findEspnEplRow } from './standings-epl.js';
-import { fetchEspnEplTeamSchedule } from './espn.js';
-import { cfbRecordsCache } from './standings-cfb.js';
-import { findEspnNflRow } from './standings-nfl.js';
+import { fetchEspnTeamSchedule, fetchEspnScoreboard, findEspnScoreboardLine } from './espn.js';
+import { findCfbRecord, findEspnCfbRow, fetchEspnCfbRecordsCached } from './standings-cfb.js';
+import { findEspnNflRow, fetchEspnNflStandingsCached } from './standings-nfl.js';
+import { nbaRecordLabel, findEspnNbaRow, fetchEspnNbaStandingsCached } from './standings-nba.js';
+import { nhlRecordLabel, findEspnNhlRow, fetchEspnNhlStandingsCached } from './standings-nhl.js';
+import { mlbRecordLabel, findEspnMlbRow, fetchEspnMlbStandingsCached } from './standings-mlb.js';
+import { wnbaRecordLabel, findEspnWnbaRow, fetchEspnWnbaStandingsCached } from './standings-wnba.js';
 import { trackerSectionHtml } from './league-facts.js';
+
+// Every league whose Most Recent Result/Next Match comes from ESPN's
+// team-schedule endpoint (js/espn.js's fetchEspnTeamSchedule) rather
+// than TheSportsDB — see the "EPL/NBA/NHL/MLB/WNBA" branch in
+// fetchTeamBundle below. Each entry's `ensureStandings` is that
+// league's own fetchCached (called first so `findRow` can resolve this
+// club's ESPN team id by name — ESPN's ids don't line up with
+// TheSportsDB's sportsdbId), and `sportPath` is ESPN's own sport/league
+// slug for the schedule URL.
+const FLAT_SCHEDULE_LEAGUES = {
+  epl: { sportPath: 'soccer/eng.1', ensureStandings: fetchEplStandingsTable, findRow: findEspnEplRow },
+  nfl: { sportPath: 'football/nfl', ensureStandings: fetchEspnNflStandingsCached, findRow: findEspnNflRow },
+  cfb: { sportPath: 'football/college-football', ensureStandings: fetchEspnCfbRecordsCached, findRow: findEspnCfbRow },
+  nba: { sportPath: 'basketball/nba', ensureStandings: fetchEspnNbaStandingsCached, findRow: findEspnNbaRow },
+  nhl: { sportPath: 'hockey/nhl', ensureStandings: fetchEspnNhlStandingsCached, findRow: findEspnNhlRow },
+  mlb: { sportPath: 'baseball/mlb', ensureStandings: fetchEspnMlbStandingsCached, findRow: findEspnMlbRow },
+  wnba: { sportPath: 'basketball/wnba', ensureStandings: fetchEspnWnbaStandingsCached, findRow: findEspnWnbaRow }
+};
+
+// Today's scoreboard for a league — one shared fetch per sportPath
+// (mirrors rundownDayCache in js/api.js), not one per team, since every
+// team in FLAT_SCHEDULE_LEAGUES sharing a sportPath reads the exact
+// same response. This is what replaces TheRundown for live in-game
+// state (score/clock while a game is actually in progress) across
+// those 7 leagues — see fetchEspnScoreboard/findEspnScoreboardLine in
+// js/espn.js. Short TTL since a live score can move by the second;
+// same cadence TheRundown's own day-cache used.
+const ESPN_SCOREBOARD_TTL_MS = 60 * 1000;
+const espnScoreboardCache = {}; // sportPath -> { events, fetchedAt }
+
+async function fetchEspnScoreboardCached(sportPath){
+  const cached = espnScoreboardCache[sportPath];
+  if(cached && (Date.now() - cached.fetchedAt) < ESPN_SCOREBOARD_TTL_MS) return cached.events;
+  const events = await fetchEspnScoreboard(sportPath);
+  espnScoreboardCache[sportPath] = { events, fetchedAt: Date.now() };
+  return events;
+}
 
 const LIVE_DATA_CACHE_KEY = 'teamDashboardLiveDataCache';
 
@@ -143,25 +184,34 @@ async function fetchTeamBundle(teamKey){
     const id = meta.sportsdbId;
     const useV2 = V2_MIGRATED_LEAGUES.includes(meta.leagueKey);
 
-    // EPL: real schedule (past results + every remaining fixture) from
-    // ESPN (js/espn.js) instead of TheSportsDB V2's schedule-previous/
-    // schedule-next — see fetchEspnEplTeamSchedule for what that adds
-    // (real venue names, TV broadcasts). Standings have to load first:
-    // ESPN's team ids don't line up with TheSportsDB's sportsdbId (same
-    // issue findEspnEplRow already solves for the stat strip), so this
-    // club's ESPN id is resolved by name through the standings table
-    // rather than carried as its own TEAM_META field.
-    if(meta.leagueKey === 'epl'){
-      await fetchEplStandingsTable();
-      const row = findEspnEplRow(meta);
-      const [info, eplSchedule, rundownEvent] = await Promise.all([
-        fetchTeamInfoCached(teamKey, id, useV2),
-        row ? fetchEspnEplTeamSchedule(row.id) : Promise.resolve(null),
-        fetchRundownEventForTeam(meta)
-      ]);
-      const bundle = { info, last: null, next: null, eplSchedule, rundownEvent, rundownTeamId: meta.rundownTeamId || null, fetchedAt: new Date() };
-      setTeamBundle(teamKey, bundle);
-      return bundle;
+    // EPL/NFL/CFB/NBA/NHL/MLB/WNBA: real schedule (past results + every
+    // remaining fixture) from ESPN (js/espn.js) instead of TheSportsDB's
+    // eventslast/eventsnext (V1) or schedule-previous/schedule-next
+    // (V2) — see fetchEspnTeamSchedule for what that adds (real venue
+    // names, TV broadcasts). Standings have to load first: ESPN's team
+    // ids don't line up with TheSportsDB's sportsdbId (same issue
+    // findEspnEplRow/findEspnNbaRow/etc already solve for the stat
+    // strip), so this club's ESPN id is resolved by name through the
+    // standings table rather than carried as its own TEAM_META field.
+    // Only commits to this path once that id actually resolves — CFB's
+    // one FCS team (NDSU) has no row in ESPN's FBS-only standings, so
+    // it falls through to the generic TheSportsDB branch below instead
+    // of ending up with no schedule at all.
+    const flatSchedule = FLAT_SCHEDULE_LEAGUES[meta.leagueKey];
+    if(flatSchedule){
+      await flatSchedule.ensureStandings();
+      const row = flatSchedule.findRow(meta);
+      if(row){
+        const [info, espnSchedule, scoreboardEvents] = await Promise.all([
+          fetchTeamInfoCached(teamKey, id, useV2),
+          fetchEspnTeamSchedule(flatSchedule.sportPath, row.id),
+          fetchEspnScoreboardCached(flatSchedule.sportPath)
+        ]);
+        const espnLive = findEspnScoreboardLine(scoreboardEvents, row.id);
+        const bundle = { info, last: null, next: null, espnSchedule, espnLive, rundownTeamId: meta.rundownTeamId || null, fetchedAt: new Date() };
+        setTeamBundle(teamKey, bundle);
+        return bundle;
+      }
     }
 
     // TheSportsDB-primary teams (the common case): everything comes from
@@ -227,16 +277,16 @@ export function renderStats(meta, bundle){
     }
   }
 
-  // CFB: TheRundown's /teams/{sportId} (already fetched for the
-  // Standings tab and the board's per-team record — see
-  // fetchCfbRecords/renderCfbCardRecord in js/standings-cfb.js)
-  // carries a real record and AP Top 25 rank, more useful here than
-  // TheSportsDB's generic Sport/Founded/Stadium bio fields.
+  // CFB: findCfbRecord (js/standings-cfb.js) — ESPN's full FBS
+  // standings first, falling back to TheRundown only for the one
+  // drafted FCS team ESPN's standings don't cover — carries a real
+  // record and AP Top 25 rank, more useful here than TheSportsDB's
+  // generic Sport/Founded/Stadium bio fields.
   if(meta.leagueKey === 'cfb'){
-    const rec = meta.rundownTeamId ? (cfbRecordsCache.byTeamId || {})[meta.rundownTeamId] : null;
-    if(rec && rec.record){
+    const rec = findCfbRecord(meta);
+    if(rec && rec.wins !== null){
       el.innerHTML = `
-        <div class="stat-cell"><div class="num">${rec.record}</div><div class="lbl">Record</div></div>
+        <div class="stat-cell"><div class="num">${rec.wins}-${rec.losses}</div><div class="lbl">Record</div></div>
         <div class="stat-cell"><div class="num">${typeof rec.ranking === 'number' ? '#' + rec.ranking : 'NR'}</div><div class="lbl">AP Rank</div></div>
       `;
       return;
@@ -256,6 +306,56 @@ export function renderStats(meta, bundle){
       const recordLabel = `${row.wins}-${row.losses}${row.ties ? '-' + row.ties : ''}`;
       el.innerHTML = `
         <div class="stat-cell"><div class="num">${recordLabel}</div><div class="lbl">Record</div></div>
+        <div class="stat-cell"><div class="num" style="font-size:14px;">${row.conferenceAbbr || '—'}</div><div class="lbl">Conference</div></div>
+      `;
+      return;
+    }
+  }
+
+  // NBA/NHL/MLB/WNBA: same ESPN standings source the Standings tab
+  // reads (js/standings-flat.js's createFlatStandingsBoard) — these 4
+  // leagues had no real record source at all before ESPN, only the
+  // generic Sport/Founded/Stadium bio fields below.
+  if(meta.leagueKey === 'nba'){
+    const record = nbaRecordLabel(meta);
+    if(record){
+      const row = findEspnNbaRow(meta);
+      el.innerHTML = `
+        <div class="stat-cell"><div class="num">${record}</div><div class="lbl">Record</div></div>
+        <div class="stat-cell"><div class="num" style="font-size:14px;">${row.conferenceAbbr || '—'}</div><div class="lbl">Conference</div></div>
+      `;
+      return;
+    }
+  }
+  if(meta.leagueKey === 'nhl'){
+    const record = nhlRecordLabel(meta);
+    if(record){
+      const row = findEspnNhlRow(meta);
+      el.innerHTML = `
+        <div class="stat-cell"><div class="num">${row.wins}-${row.losses}-${row.otLosses || 0}</div><div class="lbl">Record</div></div>
+        <div class="stat-cell"><div class="num">${row.points}</div><div class="lbl">Points</div></div>
+        <div class="stat-cell"><div class="num" style="font-size:14px;">${row.conferenceAbbr || '—'}</div><div class="lbl">Conference</div></div>
+      `;
+      return;
+    }
+  }
+  if(meta.leagueKey === 'mlb'){
+    const record = mlbRecordLabel(meta);
+    if(record){
+      const row = findEspnMlbRow(meta);
+      el.innerHTML = `
+        <div class="stat-cell"><div class="num">${record}</div><div class="lbl">Record</div></div>
+        <div class="stat-cell"><div class="num" style="font-size:14px;">${row.conferenceAbbr || '—'}</div><div class="lbl">League</div></div>
+      `;
+      return;
+    }
+  }
+  if(meta.leagueKey === 'wnba'){
+    const record = wnbaRecordLabel(meta);
+    if(record){
+      const row = findEspnWnbaRow(meta);
+      el.innerHTML = `
+        <div class="stat-cell"><div class="num">${record}</div><div class="lbl">Record</div></div>
         <div class="stat-cell"><div class="num" style="font-size:14px;">${row.conferenceAbbr || '—'}</div><div class="lbl">Conference</div></div>
       `;
       return;
@@ -320,11 +420,11 @@ function renderForm(id, bundle){
   }
 
   // EPL: real schedule data from ESPN (js/espn.js) instead of
-  // TheSportsDB's eventslast — see fetchEspnEplTeamSchedule. Adds a
+  // TheSportsDB's eventslast — see fetchEspnTeamSchedule. Adds a
   // "Form" strip (last 5 results) above the usual detailed line, and a
   // real venue name on that line — neither available from TheSportsDB.
-  if(bundle.eplSchedule){
-    const recent = bundle.eplSchedule.recent;
+  if(bundle.espnSchedule){
+    const recent = bundle.espnSchedule.recent;
     const evt = recent && recent[0];
     if(!evt){
       el.innerHTML = `<div class="loading-note">No recent result found.</div>`;
@@ -396,6 +496,22 @@ function renderNext(id, bundle){
   const el = document.getElementById('live-next');
   if(!el) return;
 
+  // EPL/NFL/CFB/NBA/NHL/MLB/WNBA: live in-game state from ESPN's
+  // scoreboard (js/espn.js) instead of TheRundown — see
+  // fetchEspnScoreboardCached/findEspnScoreboardLine above. Checked
+  // first since a game actually in progress takes priority over the
+  // upcoming-fixture line the espnSchedule branch below would show.
+  if(bundle.espnLive && bundle.espnLive.isLive){
+    const line = bundle.espnLive;
+    el.innerHTML = `
+      <div class="nm-left">
+        <div class="nm-teams">${line.isHome ? 'vs' : 'at'} ${line.opponentName}</div>
+        <div class="nm-when"><span class="live-badge">LIVE</span> ${line.own}-${line.opp} · ${line.period}</div>
+      </div>
+    `;
+    return;
+  }
+
   const rEvt = bundle.rundownEvent;
   const rStatus = rEvt && rEvt.score && rEvt.score.event_status;
 
@@ -425,10 +541,10 @@ function renderNext(id, bundle){
   }
 
   // EPL: real schedule data from ESPN (js/espn.js) instead of
-  // TheSportsDB's eventsnext — see fetchEspnEplTeamSchedule. Adds the
+  // TheSportsDB's eventsnext — see fetchEspnTeamSchedule. Adds the
   // real venue and TV broadcast, neither available from TheSportsDB.
-  if(bundle.eplSchedule){
-    const evt = bundle.eplSchedule.upcoming && bundle.eplSchedule.upcoming[0];
+  if(bundle.espnSchedule){
+    const evt = bundle.espnSchedule.upcoming && bundle.espnSchedule.upcoming[0];
     if(!evt){
       el.innerHTML = `<div class="loading-note">No upcoming match scheduled yet.</div>`;
       return;
@@ -487,6 +603,15 @@ export function renderRowStatus(teamKey, bundle){
   const meta = TEAM_META[teamKey];
   const id = meta.sportsdbId;
 
+  // EPL/NFL/CFB/NBA/NHL/MLB/WNBA: live in-game state from ESPN's
+  // scoreboard instead of TheRundown — see findEspnScoreboardLine in
+  // js/espn.js. Same priority-over-everything-else idea as renderNext.
+  if(bundle.espnLive && bundle.espnLive.isLive){
+    el.textContent = `LIVE ${bundle.espnLive.own}-${bundle.espnLive.opp}`;
+    el.className = 'row-status live';
+    return;
+  }
+
   const rEvt = bundle.rundownEvent;
   const rStatus = rEvt && rEvt.score && rEvt.score.event_status;
 
@@ -516,17 +641,37 @@ export function renderRowStatus(teamKey, bundle){
     }
   }
 
-  // EPL: real schedule data from ESPN (js/espn.js) instead of
-  // TheSportsDB's eventsnext — see fetchEspnEplTeamSchedule. EPL is
-  // itself in UPCOMING_CHIP_LEAGUES below, so this pill always shows
-  // the next match regardless of when it falls, same as before.
-  if(bundle.eplSchedule){
-    const nextEvt = bundle.eplSchedule.upcoming && bundle.eplSchedule.upcoming[0];
+  // CFB/EPL/NFL show the next match regardless of when it falls, rather
+  // than only for today's game — see UPCOMING_CHIP_LEAGUES in js/api.js.
+  // Every other league keeps "today's game, else last result", since a
+  // nightly slate makes "next match" far less interesting than a look
+  // back at how last night went.
+  const showsUpcoming = UPCOMING_CHIP_LEAGUES.includes(meta.leagueKey);
+
+  // EPL/NBA/NHL/MLB/WNBA: real schedule data from ESPN (js/espn.js)
+  // instead of TheSportsDB's eventsnext — see fetchEspnTeamSchedule.
+  // Still respects showsUpcoming above: EPL always shows its next
+  // match, but NBA/NHL/MLB/WNBA keep the nightly-slate "today's game,
+  // else last result" behavior they had on TheSportsDB, just sourced
+  // from ESPN now.
+  if(bundle.espnSchedule){
+    const nextEvt = bundle.espnSchedule.upcoming && bundle.espnSchedule.upcoming[0];
     if(nextEvt){
       const d = new Date(nextEvt.date);
-      if(!isNaN(d.getTime())){
+      if(!isNaN(d.getTime()) && (showsUpcoming || d.toDateString() === new Date().toDateString())){
         el.textContent = formatChipUpcoming(d);
         el.className = 'row-status next';
+        return;
+      }
+    }
+    if(!showsUpcoming){
+      const lastEvt = bundle.espnSchedule.recent && bundle.espnSchedule.recent[0];
+      if(lastEvt && lastEvt.ownScore !== null && lastEvt.oppScore !== null){
+        let cls = 'd', label = 'D';
+        if(lastEvt.ownScore > lastEvt.oppScore){ cls = 'w'; label = 'W'; }
+        else if(lastEvt.ownScore < lastEvt.oppScore){ cls = 'l'; label = 'L'; }
+        el.textContent = `${label} ${lastEvt.ownScore}-${lastEvt.oppScore}`;
+        el.className = 'row-status ' + cls;
         return;
       }
     }
@@ -534,13 +679,6 @@ export function renderRowStatus(teamKey, bundle){
     el.className = 'row-status';
     return;
   }
-
-  // CFB shows the next match regardless of when it falls, rather than
-  // only for today's game — see UPCOMING_CHIP_LEAGUES in js/api.js.
-  // Every other league keeps "today's game, else last result", since a
-  // nightly slate makes "next match" far less interesting than a look
-  // back at how last night went.
-  const showsUpcoming = UPCOMING_CHIP_LEAGUES.includes(meta.leagueKey);
 
   const nextEvt = bundle.next && bundle.next.events && bundle.next.events[0];
   if(nextEvt && nextEvt.strTimestamp){
