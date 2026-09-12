@@ -1,8 +1,9 @@
 # ESPN hidden API — evaluation & migration plan
 
-**Status: Phase 1 (pilot/evaluation) complete, 2026-09-11. Not yet wired into the live app.**
-**Pilot code:** [`js/espn.js`](../js/espn.js) — implemented, parse-tested against real ESPN
-responses (see Pilot Results below), but not imported by any other file yet.
+**Status: Phases 1-3 and the EPL phase below are live. Phases 4-5 not started.**
+**Code:** [`js/espn.js`](../js/espn.js), wired into [`js/standings-nfl.js`](../js/standings-nfl.js),
+[`js/standings-cfb.js`](../js/standings-cfb.js) (rankings only), and
+[`js/standings-epl.js`](../js/standings-epl.js).
 
 ## Why this file exists
 
@@ -197,6 +198,57 @@ no current UI surface needs it) as part of this migration. They're real and veri
 they're new capabilities nobody requested, not fixes for something broken today — building them now
 would be scope creep beyond what this evaluation set out to do.
 
+## EPL phase (added 2026-09-11, outside this plan's original NFL/CFB scope)
+
+Migrated EPL's league table from TheSportsDB V1 (`lookuptable.php`, routed through
+`worker/rundown-proxy.js`'s now-removed `/sportsdb/table/:leagueId/:season` route) to ESPN's hidden
+API, on request, once the NFL/CFB pattern above had already proven out. Unlike NFL/CFB, TheSportsDB's
+table endpoint actually worked for EPL (it's the one league that had real standings from it) — this
+wasn't a broken-data fix like Phases 2-3, just consolidating onto the one already-adopted API and
+dropping a worker route (and its premium-key dependency) that only EPL used.
+
+**Endpoint:** `GET https://site.web.api.espn.com/apis/v2/sports/soccer/eng.1/standings` — same
+`site.web.api.espn.com` host as NFL/CFB, same open CORS (`access-control-allow-origin: *`), no key. A
+single-table league only has one standings type, so (unlike NFL's conference split) the real per-team
+rows are one level shallower: `data.children[0].standings.entries[]`, not `data.children[].standings...`
+per group.
+
+**Field parity, verified against a live pull (2026-09-11) covering all 20 currently-drafted clubs:**
+every field the Standings tab, board cards, the team modal, and the League Facts rank-auto rules used
+from TheSportsDB's table (rank, wins, draws, losses, points) has a direct ESPN equivalent
+(`stats[name=rank/wins/ties/losses/points].value`). ESPN's table is a strict superset — it also
+carries `gamesPlayed`, `pointDifferential` (goal difference), `pointsFor`/`pointsAgainst` (goals
+for/against), and a qualification/relegation `note.description` (e.g. "Champions League", "Europa
+League", "Relegation") that TheSportsDB's table never exposed at all. None of those extra fields are
+wired into the UI yet — this migration was a straight data-source swap, not a feature addition; adding
+a zone-color treatment to the standings table would be a reasonable, separate follow-up.
+
+**ID mapping:** ESPN's team ids don't line up with TheSportsDB's `sportsdbId` (same "don't trust ID
+reuse" lesson as finding #4 above), so matching now goes by club name instead — reusing
+`findDraftedTeamByName` from `js/utils.js` unchanged (already the match strategy the old EPL code used
+for turning a table row into a drafted team). No EPL-specific override table was needed, unlike
+CFB/NFL: `findDraftedTeamByName`'s `normalizeTeamName` helper already carries a `'man city'`/
+`'man united'` alias from an earlier fix, which happens to be the only pair of the 20 drafted clubs
+whose ESPN name ("Manchester City"/"Manchester United") doesn't substring-match this app's shortened
+`meta.name` ("Man City"/"Man United"). Everything else — including clubs this app abbreviates
+differently, like "Newcastle" (ESPN: "Newcastle United") and "Brighton" (ESPN: "Brighton & Hove
+Albion") — matches through the plain substring rule, confirmed against the live pull.
+
+**Follow-up (same day):** the "reasonable, separate follow-up" mentioned above landed almost
+immediately — EPL's schedule (Most Recent Result / Next Match) moved off TheSportsDB V2's
+`schedule-previous`/`schedule-next` onto ESPN's `teams/{id}/schedule` (default call = played matches
+this season, `?fixture=true` = every remaining fixture), and the standings' zone field got wired into
+the team card as a colored tag. Same call count per team as before (2 schedule calls), but each now
+carries a real venue name and TV broadcast that TheSportsDB never had — see `fetchEspnEplTeamSchedule`
+in `js/espn.js` and `renderForm`/`renderNext`/`renderRowStatus` in `js/live-data.js`. Added a "Form"
+strip (last 5 results as pills) computed client-side from the same schedule response — no extra
+request. This club's ESPN team id is resolved the same way `findEspnEplRow` already does for the stat
+strip (by name, through the standings cache), not a new stored field, so `fetchTeamBundle` awaits
+`fetchEplStandingsTable()` before fetching the schedule. Deliberately left out: DraftKings odds (also
+available on ESPN's per-match `summary` endpoint) — the CSS already has a `.nm-prob` slot that looks
+built for exactly this, but showing a sportsbook line in a friend-group fantasy app was called a tone
+decision, not a technical one, and shelved for now.
+
 ## What stays on TheRundown
 
 Live in-game state (`fetchRundownEventForTeam`, `isRundownEventLive` in `js/api.js`) is unaffected by
@@ -208,8 +260,12 @@ the standings/rankings migration above.
 ## If this holds up: what Phase 2+ removes
 
 Every standings/rankings call that moves to ESPN is one that (a) no longer touches the 20,000/day
-TheRundown budget, and (b) no longer needs `worker/rundown-proxy.js` at all — CORS is open, so it's a
-direct browser fetch, zero proxy code. If Phases 2-4 all land, `worker/rundown-proxy.js` shrinks to
-just the League Facts KV store (job #2 in its own header comment) plus whatever's left of the
-TheRundown live-state proxy — worth revisiting that file's own header comment once this migration is
-further along, since large chunks of "why this worker exists" will no longer apply.
+TheRundown budget (or, for EPL, the premium TheSportsDB key's own limits), and (b) no longer needs
+`worker/rundown-proxy.js` at all — CORS is open, so it's a direct browser fetch, zero proxy code. The
+EPL phase already did this: its `/sportsdb/table/:leagueId/:season` route (and the now-unused
+`sportsdbTable` cache TTL) are removed from the worker entirely, since EPL was the only league that
+ever called it. If Phases 2-4 all land too, `worker/rundown-proxy.js` shrinks further to just the
+League Facts KV store (job #2 in its own header comment), the one-off TheSportsDB V1 admin lookup, the
+V2 team/schedule proxy, and whatever's left of the TheRundown live-state proxy — worth revisiting that
+file's own header comment once this migration is further along, since large chunks of "why this worker
+exists" will no longer apply.

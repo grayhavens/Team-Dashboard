@@ -25,15 +25,14 @@
       real paid credential (unlike the free "123" key, which is
       public and meant to be embedded client-side) and must never
       ship in client-side JS either. Forwards a small allowlist of
-      team/schedule/table requests to TheSportsDB on the dashboard's
-      behalf: V2 (header auth, https://www.thesportsdb.com/api/v2/json)
-      for team lookup and schedules, V1 (key embedded in the URL path,
-      like the old free key) for the league table — V2's docs don't
-      show a standings/table endpoint, and premium is documented to
-      raise V1's own limits too, so V1-with-the-premium-key is the
-      deliberate choice here rather than a fallback we forgot to
-      finish. Unverified until tested with a real key — see the
-      migration plan's Phase 1.
+      team/schedule requests to TheSportsDB's V2 API (header auth,
+      https://www.thesportsdb.com/api/v2/json) on the dashboard's
+      behalf, plus one V1 (key embedded in the URL path, like the old
+      free key) admin route for one-off league lookups. The league
+      TABLE route that used to live here (V1's lookuptable.php, for
+      EPL standings) is retired — EPL standings moved to ESPN's hidden
+      API (js/espn.js), which is CORS-open and needs no proxy at all.
+      See docs/espn-migration-plan.md.
 
    EDGE CACHING — every proxied GET is cached in Workers' shared edge
    cache (caches.default), keyed on the upstream URL alone, with a TTL
@@ -132,8 +131,7 @@ const CACHE_TTL_SECONDS = {
   rundownEvents: 60,           // a day's slate barely changes minute to minute
   rundownTeams: 60 * 60,       // one-off/occasional lookups, not polled on a schedule
   sportsdbTeam: 24 * 60 * 60,  // sport/founded/stadium/colors — effectively static
-  sportsdbSchedule: 60,        // last-result / next-fixture, refreshed on the same cadence as rundownEvents
-  sportsdbTable: 15 * 60       // league standings
+  sportsdbSchedule: 60         // last-result / next-fixture, refreshed on the same cadence as rundownEvents
 };
 
 // Shared building block for every proxy below: check the edge cache
@@ -286,12 +284,6 @@ async function handleSportsDb(request, url, env, headers, ctx){
   }
   if((match = url.pathname.match(/^\/sportsdb\/schedule-previous\/(\d+)$/))){
     return proxyToSportsDbV2(`/schedule/previous/team/${match[1]}`, env, headers, CACHE_TTL_SECONDS.sportsdbSchedule, ctx);
-  }
-  // No confirmed V2 standings endpoint exists — this deliberately
-  // stays on V1 with the premium key attached. See the header comment.
-  if((match = url.pathname.match(/^\/sportsdb\/table\/(\d+)\/([\w-]+)$/))){
-    const [, leagueId, season] = match;
-    return proxyToSportsDbV1(`/lookuptable.php?l=${leagueId}&s=${season}`, env, headers, CACHE_TTL_SECONDS.sportsdbTable, ctx);
   }
 
   return new Response('Not found', { status: 404, headers });

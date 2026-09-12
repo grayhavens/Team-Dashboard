@@ -1,28 +1,25 @@
 /* ============================================================
    League Standings: EPL's real per-club table.
-   Only EPL is wired to live data right now — TheSportsDB's free demo
-   key returns a usable (if capped) table for it. Every other league
-   came back empty when tested against the free key, so those just
-   show a "no data" placeholder rather than pretending to fetch.
-   If this moves to a premium key later, wire the rest up the same
-   way EPL is done here.
+
+   Reads ESPN's hidden API (js/espn.js) — see docs/espn-migration-plan.md's
+   EPL phase. This used to read TheSportsDB V1's lookuptable.php, routed
+   through the worker with the premium key (V1 has no CORS, unlike
+   ESPN); that's fully retired from this file now, including the
+   worker's own /sportsdb/table route. No worker proxy needed here
+   either (CORS-open, fetched directly) — same as NFL/CFB.
    ============================================================ */
 import { LEAGUES, TEAM_META, DRAFT_TEAMS, LEAGUE_SCORING } from './data.js';
-import { fetchJSON, findDraftedTeamByName, teamBadgeHtml, abbrFromName, ordinal } from './utils.js';
-import { DASHBOARD_WORKER_BASE } from './api.js';
+import { findDraftedTeamByName, normalizeTeamName, teamBadgeHtml, abbrFromName, ordinal } from './utils.js';
+import { fetchEspnEplStandings } from './espn.js';
 import { renderStandings } from './board.js';
 import { liveDataCache, renderLiveBundle } from './live-data.js';
 
-const EPL_LEAGUE_ID = '4328';
-const EPL_API_SEASON = '2026-2027';
-const EPL_STANDINGS_CACHE_KEY = 'teamDashboardEplStandingsCache';
-// How long a fetched table is trusted before a background refresh is
-// attempted again — matches the board's own ~15min refresh cadence.
-// Doesn't gate *display*: a stale cached table (even one restored from
-// localStorage from a previous session) is still shown immediately
-// rather than blocked on a fresh fetch — same "show what we have, then
-// quietly refresh" approach as the row-status pill cache.
-const EPL_STANDINGS_TTL_MS = 15 * 60 * 1000;
+const ESPN_EPL_STANDINGS_CACHE_KEY = 'teamDashboardEspnEplStandingsCache';
+// Standings can move the moment a match ends, so this stays on the same
+// hourly cadence as NFL's ESPN-sourced cache (ESPN_NFL_STANDINGS_TTL_MS
+// in js/standings-nfl.js) rather than the old 15min TTL that was tuned
+// for TheSportsDB's own refresh cadence.
+const EPL_STANDINGS_TTL_MS = 60 * 60 * 1000;
 export const eplStandingsCache = { table: null, error: false, loading: false, fetchedAt: null };
 let eplStandingsPromise = null;
 
@@ -31,7 +28,7 @@ export function eplStandingsIsFresh(){
 }
 
 function saveEplStandingsCache(){
-  try { localStorage.setItem(EPL_STANDINGS_CACHE_KEY, JSON.stringify(eplStandingsCache)); } catch (e){}
+  try { localStorage.setItem(ESPN_EPL_STANDINGS_CACHE_KEY, JSON.stringify(eplStandingsCache)); } catch (e){}
 }
 
 // One shared table for every EPL team — modal stats, the Standings
@@ -44,7 +41,7 @@ function saveEplStandingsCache(){
 // up with N duplicate copies of the same ~20-row table.
 export function loadEplStandingsCache(){
   try {
-    const raw = localStorage.getItem(EPL_STANDINGS_CACHE_KEY);
+    const raw = localStorage.getItem(ESPN_EPL_STANDINGS_CACHE_KEY);
     if(!raw) return;
     const parsed = JSON.parse(raw);
     if(parsed && parsed.table){
@@ -63,14 +60,10 @@ export function fetchEplStandingsTable(){
 
   eplStandingsCache.loading = true;
   eplStandingsPromise = (async () => {
-    // Routed through the worker with the premium key (V1's lookuptable.php
-    // has no V2 equivalent, but premium raises V1's own row cap too —
-    // confirmed returning all 20 EPL rows instead of the free tier's 5,
-    // see the migration plan's Phase 1 findings).
-    const data = await fetchJSON(`${DASHBOARD_WORKER_BASE}/sportsdb/table/${EPL_LEAGUE_ID}/${EPL_API_SEASON}`);
+    const rows = await fetchEspnEplStandings();
     eplStandingsCache.loading = false;
-    if(data && data.table && data.table.length){
-      eplStandingsCache.table = data.table;
+    if(rows && rows.length){
+      eplStandingsCache.table = rows;
       eplStandingsCache.error = false;
       eplStandingsCache.fetchedAt = Date.now();
       saveEplStandingsCache();
@@ -91,6 +84,31 @@ export function fetchEplStandingsTable(){
   return eplStandingsPromise;
 }
 
+// ESPN's full club names ("Manchester City", "Manchester United") match
+// this app's abbreviated meta.name ("Man City", "Man United") via
+// findDraftedTeamByName as-is — normalizeTeamName (js/utils.js) already
+// carries a 'man city'/'man united' alias for exactly this mismatch, so
+// no EPL-specific override table is needed here, unlike CFB/NFL's own
+// name/abbreviation overrides.
+export function findEplTeamKeyByEspnName(espnTeamName){
+  return findDraftedTeamByName('epl', espnTeamName);
+}
+
+// The reverse direction — given a drafted team's own meta, find its row
+// in the ESPN standings cache. Used by eplRecordLabel (board cards) and
+// js/live-data.js's EPL stat cell, so every place this app shows an EPL
+// team's record reads the exact same ESPN data the Standings tab does.
+// Mirrors findEspnNflRow in js/standings-nfl.js.
+export function findEspnEplRow(meta){
+  const rows = eplStandingsCache.table;
+  if(!rows) return null;
+  const wanted = normalizeTeamName(meta.name);
+  return rows.find(row => {
+    const candidate = normalizeTeamName(row.teamName);
+    return candidate === wanted || candidate.includes(wanted) || wanted.includes(candidate);
+  }) || null;
+}
+
 // Record + table position shown on each EPL team's board row, in place
 // of the static "Premier League" boardSub text (every EPL team is in
 // the same league, so that label carried no information) — same
@@ -99,11 +117,9 @@ export function fetchEplStandingsTable(){
 // cfbRecordLabel/renderCfbCardRecord in js/standings-cfb.js for the
 // identical pattern on the CFB side).
 export function eplRecordLabel(meta){
-  const row = meta.sportsdbId && eplStandingsCache.table
-    ? eplStandingsCache.table.find(r => r.idTeam === meta.sportsdbId)
-    : null;
+  const row = findEspnEplRow(meta);
   if(!row) return '';
-  return `${row.intWin}-${row.intDraw}-${row.intLoss} &middot; ${ordinal(row.intRank)}`;
+  return `${row.wins}-${row.draws}-${row.losses} &middot; ${ordinal(row.rank)}`;
 }
 
 export function renderEplCardRecord(teamKey){
@@ -117,12 +133,17 @@ export function renderAllEplCardRecords(){
 }
 
 export function renderStandingsRow(leagueKey, row){
-  const teamKey = findDraftedTeamByName(leagueKey, row.strTeam);
+  const teamKey = findEplTeamKeyByEspnName(row.teamName);
+  // An undrafted club has no TEAM_META entry (so no SportsDB badge),
+  // but ESPN's own logoUrl covers it — real crest, same onerror
+  // fallback to the plain monogram if it ever fails (see
+  // renderNflStandingsRow in js/standings-nfl.js for the identical
+  // pattern on the NFL side).
   const meta = teamKey ? TEAM_META[teamKey] : {
-    name: row.strTeam,
+    name: row.teamName,
     badgeStyle: 'background: rgba(255,255,255,0.08); color: var(--text-sub); border-color: var(--hairline-strong);',
-    badgeText: abbrFromName(row.strTeam),
-    badgeUrl: null
+    badgeText: row.abbreviation || abbrFromName(row.teamName),
+    badgeUrl: row.logoUrl || null
   };
   const draftedByHtml = teamKey
     ? `<div class="drafted-by-chip">${DRAFT_TEAMS.find(d => d.id === meta.draftTeamId).name}</div>`
@@ -130,11 +151,11 @@ export function renderStandingsRow(leagueKey, row){
 
   return `
     <div class="standings-row ${teamKey ? 'clickable' : ''}" ${teamKey ? `onclick="openTeamModal('${teamKey}')"` : ''}>
-      <div class="standings-rank">${row.intRank}</div>
+      <div class="standings-rank">${row.rank}</div>
       ${teamBadgeHtml(meta)}
       <div class="team-main">
-        <div class="team-name">${row.strTeam}</div>
-        <div class="team-sub">${row.intWin}-${row.intDraw}-${row.intLoss} &middot; ${row.intPoints} pts</div>
+        <div class="team-name">${row.teamName}</div>
+        <div class="team-sub">${row.wins}-${row.draws}-${row.losses} &middot; ${row.points} pts</div>
       </div>
       ${draftedByHtml}
     </div>
@@ -166,13 +187,13 @@ export function computeEplDrafterCombined(){
   });
 
   (eplStandingsCache.table || []).forEach(row => {
-    const teamKey = findDraftedTeamByName('epl', row.strTeam);
+    const teamKey = findEplTeamKeyByEspnName(row.teamName);
     if(!teamKey) return;
     const bucket = byDrafter[TEAM_META[teamKey].draftTeamId];
-    bucket.win += parseInt(row.intWin, 10) || 0;
-    bucket.draw += parseInt(row.intDraw, 10) || 0;
-    bucket.loss += parseInt(row.intLoss, 10) || 0;
-    bucket.points += parseInt(row.intPoints, 10) || 0;
+    bucket.win += row.wins || 0;
+    bucket.draw += row.draws || 0;
+    bucket.loss += row.losses || 0;
+    bucket.points += row.points || 0;
     bucket.found++;
   });
 

@@ -574,6 +574,15 @@ body{
 .form-pill.d{ background: var(--draw-soft); color: var(--draw); }
 .form-pill.l{ background: var(--loss-soft); color: var(--loss); }
 
+/* Last-5 form row (EPL, ahead of the detailed match line below it) —
+   same .form-pill circles as the detailed row, just side by side with
+   no detail text. */
+.form-strip{
+  display: flex;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
 .form-detail{
   font-size: 13px;
   font-weight: 600;
@@ -614,6 +623,17 @@ body{
   color: var(--text-sub);
   font-weight: 500;
   margin-top: 2px;
+}
+
+/* Venue + broadcast (EPL, from ESPN's real schedule data — see
+   renderNext in js/live-data.js). Its own line under nm-when rather
+   than folded in, since kickoff time + venue + network together can
+   run long ("Fri, Sep 12 at 10:00 AM EDT · Home · Anfield · Peacock"). */
+.next-match .nm-venue{
+  font-size: 11px;
+  color: var(--text-mute);
+  font-weight: 500;
+  margin-top: 1px;
 }
 
 .next-match .nm-prob{
@@ -675,17 +695,57 @@ body{
   color: var(--loss);
 }
 
-/* ---- Season tracker (achievement checklist, in team modal) ---- */
+/* ---- Season tracker (achievement checklist, in team modal) ----
+   The head (title + "Earned so far" summary + chevron) stays visible
+   whether the body (the checklist itself) is collapsed or not — only
+   trackerSectionHtml's `expanded` flag decides whether tracker-body
+   renders at all, so there's no hidden-but-present markup to fight
+   with in CSS. Sits under its own top margin (see #tracker-section
+   below) so it doesn't crowd the "Last updated" line right above it. */
+.tracker-head{
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  cursor: pointer;
+}
+
+#tracker-section{
+  margin-top: 14px;
+}
+
 .tracker-total{
   font-size: 11px;
   color: var(--text-sub);
   font-weight: 600;
-  margin-bottom: 10px;
 }
 
 .tracker-total b{
   color: var(--text);
   font-family: 'Space Grotesk', sans-serif;
+  /* Explicit, not inherited — without this, the <b> tag's default
+     "bolder" keyword resolves relative to .tracker-total's own 600,
+     which lands on 900 (the CSS bolder-keyword table steps 600->900),
+     noticeably heavier than the 700 used everywhere else in the app
+     for an emphasized Space Grotesk number (.form-score, .tracker-value,
+     .next-match .nm-teams) — that mismatch is what read as "too big". */
+  font-weight: 700;
+}
+
+.tracker-chevron{
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+  color: var(--text-mute);
+  transition: transform 0.18s ease;
+}
+
+.tracker-chevron.open{
+  transform: rotate(180deg);
+}
+
+.tracker-body{
+  margin-top: 12px;
 }
 
 .tracker-list{
@@ -697,7 +757,7 @@ body{
 .tracker-item{
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
   padding: 11px 2px;
   cursor: pointer;
   border: none;
@@ -732,7 +792,7 @@ body{
 
 .tracker-label{
   flex: 1;
-  font-size: 13.5px;
+  font-size: 12.5px;
   font-weight: 600;
   color: var(--text-sub);
 }
@@ -745,8 +805,8 @@ body{
   flex: 0 0 auto;
   font-family: 'Space Grotesk', sans-serif;
   font-weight: 700;
-  font-size: 12px;
-  padding: 3px 10px;
+  font-size: 11px;
+  padding: 2px 8px;
   border-radius: 999px;
   white-space: nowrap;
   border: 1.5px solid rgba(255,255,255,0.12);
@@ -964,6 +1024,22 @@ body{
 .live-badge.err{
   color: var(--loss);
   background: var(--loss-soft);
+}
+
+/* EPL qualification-zone tag (Champions League/Europa League/
+   Relegation) — background comes from ESPN's own note.color per team
+   (see renderStats in js/live-data.js), a different pastel per zone,
+   so text stays a fixed dark color rather than a CSS variable. */
+.zone-tag{
+  display: inline-block;
+  font-family: 'Manrope', sans-serif;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  color: #0A0B0D;
+  border-radius: 20px;
+  padding: 2px 7px;
+  vertical-align: middle;
 }
 
 .no-live-note{
