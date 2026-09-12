@@ -20,15 +20,17 @@
    needed, unlike TheRundown below.
 
    TheRundown's per-sport team list (cfbRecordsCache) — the same
-   endpoint already used to help map rundownTeamId in js/data.js —
-   still backs exactly one case: findCfbRecord falls back to it for a
-   drafted CFB team ESPN's FBS-only standings doesn't cover (NDSU, an
-   FCS program). Every other CFB team resolves through ESPN.
+   endpoint already used to help map rundownTeamId in js/data.js — is
+   kept only as a defensive fallback now: findCfbRecord reads it if
+   ESPN's own per-team fetch for NDSU (this app's one FCS program, which
+   the FBS-only standings endpoint doesn't list) happens to fail on a
+   given refresh. In normal operation every CFB team, NDSU included,
+   resolves through ESPN — see NDSU_ESPN_TEAM_ID below.
    ============================================================ */
 import { LEAGUES, TEAM_META, DRAFT_TEAMS, LEAGUE_SCORING } from './data.js';
 import { fetchJSON, teamBadgeHtml, abbrFromName } from './utils.js';
 import { DASHBOARD_WORKER_BASE, RUNDOWN_SPORT_ID } from './api.js';
-import { fetchEspnCfbRankings, fetchEspnCfbFullStandings } from './espn.js';
+import { fetchEspnCfbRankings, fetchEspnCfbFullStandings, fetchEspnCfbTeamRecord } from './espn.js';
 import { renderStandings } from './board.js';
 import { liveDataCache, renderStats } from './live-data.js';
 
@@ -194,8 +196,25 @@ export function fetchEspnCfbRankingsCached(){
 // here rather than a fuzzier auto-match that could mis-pair two
 // different schools.
 const CFB_ESPN_NAME_OVERRIDES = {
-  'Indiana': 'IU'
+  'Indiana': 'IU',
+  // NDSU's row isn't in the standings endpoint at all (see
+  // NDSU_ESPN_TEAM_ID below) — it's injected separately using ESPN's own
+  // "location" for the school, so this override just lets that injected
+  // row match this app's short "NDSU" the same way every other override
+  // here does.
+  'North Dakota State': 'NDSU'
 };
+
+// ESPN's team id for North Dakota State's Bison — resolved once via
+// site.web.api.espn.com/apis/site/v2/sports/football/college-football/teams/2449
+// (confirmed live 2026-09-11: location "North Dakota State", name
+// "Bison"). Needed because NDSU is FCS and never appears in
+// fetchEspnCfbFullStandings' FBS-only standings endpoint — this is the
+// one drafted CFB team ESPN can't resolve through that endpoint no
+// matter how it's parsed, so its record is fetched individually instead
+// (fetchEspnCfbTeamRecord) and appended as a plain extra row in
+// fetchEspnCfbRecordsCached below.
+const NDSU_ESPN_TEAM_ID = '2449';
 
 function normalizeTeamName(s){
   return (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -207,9 +226,9 @@ function findCfbTeamKeyByEspnLocation(location){
   return teams.find(teamKey => normalizeTeamName(TEAM_META[teamKey].name) === wanted) || null;
 }
 
-// ---- Full-roster records (ESPN-sourced, replacing TheRundown for the
-// 29 of 30 drafted CFB teams that are FBS — see the file header
-// comment and findCfbRecord below) ----
+// ---- Full-roster records (ESPN-sourced, replacing TheRundown for all
+// 30 drafted CFB teams — see the file header comment and findCfbRecord
+// below) ----
 
 const ESPN_CFB_RECORDS_CACHE_KEY = 'teamDashboardEspnCfbRecordsCache';
 // Same hourly cadence as the AP rankings cache above — a team's record
@@ -245,10 +264,18 @@ export function fetchEspnCfbRecordsCached(){
 
   espnCfbRecordsCache.loading = true;
   espnCfbRecordsPromise = (async () => {
-    const rows = await fetchEspnCfbFullStandings();
+    // NDSU fetched alongside the main FBS standings pull, not after —
+    // one extra request, same round-trip, rather than a second render
+    // pass once it resolves. If this one team's fetch happens to fail on
+    // a given refresh, findCfbRecord's existing TheRundown fallback
+    // still covers it that cycle (see that function's own comment).
+    const [rows, ndsuRow] = await Promise.all([
+      fetchEspnCfbFullStandings(),
+      fetchEspnCfbTeamRecord(NDSU_ESPN_TEAM_ID)
+    ]);
     espnCfbRecordsCache.loading = false;
     if(rows && rows.length){
-      espnCfbRecordsCache.rows = rows;
+      espnCfbRecordsCache.rows = ndsuRow ? [...rows, ndsuRow] : rows;
       espnCfbRecordsCache.error = false;
       espnCfbRecordsCache.fetchedAt = Date.now();
       saveEspnCfbRecordsCache();
@@ -269,13 +296,15 @@ export function fetchEspnCfbRecordsCached(){
 }
 
 // Reverse direction of findCfbTeamKeyByEspnLocation — given a drafted
-// team's own meta, find its row in the ESPN full-standings cache. The
+// team's own meta, find its row in the ESPN full-standings cache (NDSU's
+// individually-fetched row included — see NDSU_ESPN_TEAM_ID above). The
 // override table is checked both ways since a drafted team's own name
 // (e.g. "IU") is the override's *output*, not its key ("Indiana").
 // Exported for js/live-data.js too — it's also how fetchTeamBundle
-// resolves this team's ESPN id for the schedule fetch (a null return,
-// e.g. for NDSU, means that team falls back to the generic TheSportsDB
-// schedule branch there instead of getting no schedule at all).
+// resolves this team's ESPN id for the schedule fetch; a null return
+// (only if a given team's row genuinely never resolves, e.g. a transient
+// fetch failure) falls back to the generic TheSportsDB schedule branch
+// there instead of getting no schedule at all.
 export function findEspnCfbRow(meta){
   const rows = espnCfbRecordsCache.rows;
   if(!rows) return null;
@@ -285,11 +314,10 @@ export function findEspnCfbRow(meta){
 }
 
 // The real win-loss record (and AP Top 25 rank, if any) for a drafted
-// CFB team — ESPN's full FBS standings first, falling back to
-// TheRundown's cfbRecordsCache only when ESPN has no row at all, which
-// today means exactly one drafted team: NDSU, an FCS program outside
-// ESPN's FBS-only standings endpoint. Every other CFB team resolves
-// through ESPN, off TheRundown's shared daily quota entirely.
+// CFB team — ESPN first (NDSU's individually-fetched row included),
+// falling back to TheRundown's cfbRecordsCache only if a given team's
+// row genuinely isn't there, which in normal operation doesn't happen
+// for any drafted team, NDSU included.
 export function findCfbRecord(meta){
   const espnRow = findEspnCfbRow(meta);
   if(espnRow){

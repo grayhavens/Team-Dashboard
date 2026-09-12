@@ -178,42 +178,59 @@ async function fetchTeamInfoCached(teamKey, id, useV2){
 
 async function fetchTeamBundle(teamKey){
   const meta = TEAM_META[teamKey];
-  if(!meta || (!meta.sportsdbId && !meta.rundownTeamId)) return null;
+  if(!meta) return null;
+
+  // EPL/NFL/CFB/NBA/NHL/MLB/WNBA: real schedule (past results + every
+  // remaining fixture) from ESPN (js/espn.js) instead of TheSportsDB's
+  // eventslast/eventsnext (V1) or schedule-previous/schedule-next
+  // (V2) — see fetchEspnTeamSchedule for what that adds (real venue
+  // names, TV broadcasts). Standings have to load first: ESPN's team
+  // ids don't line up with TheSportsDB's sportsdbId (same issue
+  // findEspnEplRow/findEspnNbaRow/etc already solve for the stat
+  // strip), so this club's ESPN id is resolved by name through the
+  // standings table rather than carried as its own TEAM_META field —
+  // which also means this doesn't need meta.sportsdbId at all, unlike
+  // the generic branch below: NBA/NHL/MLB/WNBA teams that were never
+  // given a sportsdbId (every currently-drafted team but Josh's own —
+  // real board-card records for them already came from this same
+  // name-matching, see js/standings-flat.js) get a real modal schedule
+  // here too, not just the "not hooked up" placeholder they got before
+  // this was checked ahead of the sportsdbId gate. Only commits to this
+  // path once that id actually resolves — a team whose row genuinely
+  // never resolves falls through to the generic TheSportsDB/TheRundown
+  // branch below instead of ending up with no data at all, same as
+  // NDSU used to before it got its own ESPN row (see NDSU_ESPN_TEAM_ID
+  // in js/standings-cfb.js).
+  const flatSchedule = FLAT_SCHEDULE_LEAGUES[meta.leagueKey];
+  if(flatSchedule){
+    await flatSchedule.ensureStandings();
+    const row = flatSchedule.findRow(meta);
+    if(row){
+      // No TheSportsDB "info" fetch here — every league on this path
+      // has its own real-record branch in renderStats (findEspnEplRow,
+      // findCfbRecord, etc.) that always renders first, so bundle.info
+      // (TheSportsDB's generic Sport/Founded/Stadium bio) would never
+      // actually reach the screen for a team that resolves this far.
+      // Fetching it anyway was pure unused SportsDB traffic on every
+      // refresh — cut once that stopped being needed for NDSU too (see
+      // NDSU_ESPN_TEAM_ID in js/standings-cfb.js).
+      const [espnSchedule, scoreboard] = await Promise.all([
+        fetchEspnTeamSchedule(flatSchedule.sportPath, row.id),
+        fetchEspnScoreboardCached(flatSchedule.sportPath)
+      ]);
+      const espnLive = findEspnScoreboardLine(scoreboard ? scoreboard.events : null, row.id);
+      const espnSeason = scoreboard ? scoreboard.season : null;
+      const bundle = { info: null, last: null, next: null, espnSchedule, espnLive, espnSeason, rundownTeamId: meta.rundownTeamId || null, fetchedAt: new Date() };
+      setTeamBundle(teamKey, bundle);
+      return bundle;
+    }
+  }
+
+  if(!meta.sportsdbId && !meta.rundownTeamId) return null;
 
   if(meta.sportsdbId){
     const id = meta.sportsdbId;
     const useV2 = V2_MIGRATED_LEAGUES.includes(meta.leagueKey);
-
-    // EPL/NFL/CFB/NBA/NHL/MLB/WNBA: real schedule (past results + every
-    // remaining fixture) from ESPN (js/espn.js) instead of TheSportsDB's
-    // eventslast/eventsnext (V1) or schedule-previous/schedule-next
-    // (V2) — see fetchEspnTeamSchedule for what that adds (real venue
-    // names, TV broadcasts). Standings have to load first: ESPN's team
-    // ids don't line up with TheSportsDB's sportsdbId (same issue
-    // findEspnEplRow/findEspnNbaRow/etc already solve for the stat
-    // strip), so this club's ESPN id is resolved by name through the
-    // standings table rather than carried as its own TEAM_META field.
-    // Only commits to this path once that id actually resolves — CFB's
-    // one FCS team (NDSU) has no row in ESPN's FBS-only standings, so
-    // it falls through to the generic TheSportsDB branch below instead
-    // of ending up with no schedule at all.
-    const flatSchedule = FLAT_SCHEDULE_LEAGUES[meta.leagueKey];
-    if(flatSchedule){
-      await flatSchedule.ensureStandings();
-      const row = flatSchedule.findRow(meta);
-      if(row){
-        const [info, espnSchedule, scoreboard] = await Promise.all([
-          fetchTeamInfoCached(teamKey, id, useV2),
-          fetchEspnTeamSchedule(flatSchedule.sportPath, row.id),
-          fetchEspnScoreboardCached(flatSchedule.sportPath)
-        ]);
-        const espnLive = findEspnScoreboardLine(scoreboard ? scoreboard.events : null, row.id);
-        const espnSeason = scoreboard ? scoreboard.season : null;
-        const bundle = { info, last: null, next: null, espnSchedule, espnLive, espnSeason, rundownTeamId: meta.rundownTeamId || null, fetchedAt: new Date() };
-        setTeamBundle(teamKey, bundle);
-        return bundle;
-      }
-    }
 
     // TheSportsDB-primary teams (the common case): everything comes from
     // TheSportsDB, optionally supplemented with TheRundown's in-game
@@ -811,7 +828,12 @@ export function openTeamModal(teamKey){
   modalContent.dataset.activeTeam = teamKey;
   modalContent.dataset.activeLeagueResults = '';
 
-  const hasLive = !!meta.sportsdbId || !!meta.rundownTeamId;
+  // A team also has live data if its league is in FLAT_SCHEDULE_LEAGUES
+  // (see fetchTeamBundle) — that path matches by name/nickname, not
+  // sportsdbId, so it covers NBA/NHL/MLB/WNBA teams that were never
+  // given a sportsdbId too (every currently-drafted team but Josh's
+  // own), not just the ones with real TheSportsDB/TheRundown ids.
+  const hasLive = !!meta.sportsdbId || !!meta.rundownTeamId || !!FLAT_SCHEDULE_LEAGUES[meta.leagueKey];
   const cached = hasLive ? liveDataCache[teamKey] : null;
   const tracker = trackerSectionHtml(teamKey);
   // MLB/WNBA: the stat strip and results below are ESPN's real, live
